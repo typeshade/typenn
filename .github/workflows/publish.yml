@@ -1,0 +1,53 @@
+name: Publish to npm
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Validate the package without publishing to npm
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: https://registry.npmjs.org
+      - name: Upgrade npm
+        run: npm install -g npm@latest
+      - name: Validate package contents and imports
+        run: |
+          npm pack --dry-run
+          pack_dir=$(mktemp -d)
+          npm pack --pack-destination "$pack_dir"
+          consumer_dir=$(mktemp -d)
+          cd "$consumer_dir"
+          npm init -y
+          npm install --ignore-scripts --no-audit --no-fund "$pack_dir"/typenn-*.tgz
+          node --input-type=module -e 'import * as nn from "typenn"; if (Object.keys(nn).length !== 0) throw new Error("Expected an empty namespace");'
+          printf 'import * as nn from "typenn";\nvoid nn;\n' > check.mts
+          npm exec --yes --package=typescript -- tsc --noEmit --strict --module NodeNext --moduleResolution NodeNext check.mts
+      - name: Check publishing token
+        if: github.event_name == 'release' || !inputs.dry_run
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_ACCESS_TOKEN }}
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo 'NPM_ACCESS_TOKEN is required to publish typenn.' >&2
+            exit 1
+          fi
+      - name: Publish to npm
+        if: github.event_name == 'release' || !inputs.dry_run
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_ACCESS_TOKEN }}
+        run: npm publish --access public --provenance

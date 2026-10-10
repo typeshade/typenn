@@ -1,0 +1,32 @@
+{
+  "name": "typenn",
+  "version": "0.0.0",
+  "description": "Placeholder package for TypeNN.",
+  "type": "module",
+  "main": "./index.js",
+  "types": "./index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./index.js"
+    }
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/typeshade/typenn.git"
+  },
+  "homepage": "https://github.com/typeshade/typenn#readme",
+  "bugs": {
+    "url": "https://github.com/typeshade/typenn/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
