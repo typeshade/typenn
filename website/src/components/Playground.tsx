@@ -1,4 +1,4 @@
-import { Button, ConfigProvider, Input, Select } from "antd";
+import { Button, ConfigProvider, Input, Select, theme as antdTheme } from "antd";
 import Prism from "prismjs";
 import "prismjs/components/prism-typescript";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -84,7 +84,15 @@ export default function Playground({ locale }: { locale: "en" | "ko" }) {
   const [activeBackend, setActiveBackend] = useState<Device["backend"]["name"] | null>(null);
   const [fallback, setFallback] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [dark, setDark] = useState(false);
   const deviceEntry = useRef<DeviceEntry | null>(null);
+
+  useEffect(() => {
+    const syncTheme = () => setDark(document.documentElement.dataset.theme === "dark");
+    syncTheme();
+    window.addEventListener("typenn-theme-change", syncTheme);
+    return () => window.removeEventListener("typenn-theme-change", syncTheme);
+  }, []);
 
   function clearOutput() {
     setResult(null);
@@ -163,7 +171,10 @@ export default function Playground({ locale }: { locale: "en" | "ko" }) {
   }
 
   return (
-    <ConfigProvider theme={{ token: { colorPrimary: "#1677ff", borderRadius: 6, fontFamily: '"IBM Plex Sans", "IBM Plex Sans KR", sans-serif' } }}>
+    <ConfigProvider theme={{
+      algorithm: dark ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
+      token: { colorPrimary: "#1677ff", borderRadius: 6, fontFamily: '"IBM Plex Sans", "IBM Plex Sans KR", sans-serif' },
+    }}>
       <section className="playground-app" aria-label={words.input}>
         <div className="playground-workbench">
           <div className="playground-controls">
