@@ -4,10 +4,10 @@ import {
   builtin,
   compileModule,
   compileModuleJs,
+  externFn,
   f32,
   f32T,
   fn,
-  max,
   module,
   packModule,
   storageBuffer,
@@ -21,9 +21,14 @@ import {
   type ReadonlyNode,
   type StorageBuffer,
 } from "typeshade";
+import {
+  ELEMENTWISE_FUSION_REGISTRY,
+  type ElementwiseFusionRegistry,
+  type ElementwiseFusionOperation,
+} from "./kernel-registry.js";
 import type {
   ElementwiseFusionCandidate,
-  ElementwiseFusionExpression,
+  ElementwiseFusionValueRef,
 } from "./elementwise-fusion.js";
 
 export const ELEMENTWISE_FUSION_ENTRY = "fusedElementwiseKernel";
@@ -55,13 +60,6 @@ interface CachedProgram {
 
 const programs = new Map<string, CachedProgram>();
 
-function expressionSignature(expression: ElementwiseFusionExpression): string {
-  if (expression.kind === "input") return `i${expression.slot}`;
-  if (expression.kind === "relu")
-    return `relu(${expressionSignature(expression.input)})`;
-  return `${expression.kind}(${expressionSignature(expression.left)},${expressionSignature(expression.right)})`;
-}
-
 function isCspEvalFailure(error: unknown): boolean {
   return (
     (typeof EvalError !== "undefined" && error instanceof EvalError) ||
@@ -72,20 +70,87 @@ function isCspEvalFailure(error: unknown): boolean {
   );
 }
 
-function lowerExpression(
-  expression: ElementwiseFusionExpression,
-  inputs: StorageBuffer<ReadonlyNode<"f32">>[],
-  index: ReadonlyNode<"u32">,
-): ReadonlyNode<"f32"> {
-  if (expression.kind === "input") return inputs[expression.slot]!.at(index);
-  if (expression.kind === "relu")
-    return max(lowerExpression(expression.input, inputs, index), f32(0));
-  const left = lowerExpression(expression.left, inputs, index);
-  const right = lowerExpression(expression.right, inputs, index);
-  return expression.kind === "add" ? left.add(right) : left.mul(right);
+function helperDeclaration(
+  operation: ElementwiseFusionOperation,
+  registry: ElementwiseFusionRegistry,
+) {
+  const declaration = registry.helpers.get(operation.helperName);
+  if (!declaration)
+    throw new Error(
+      `TypeShade operation helper was not generated: ${operation.helperName}.`,
+    );
+  return declaration;
 }
 
-function buildModule(candidate: ElementwiseFusionCandidate): ModuleDecl {
+function helperCall(
+  operation: ElementwiseFusionOperation,
+  registry: ElementwiseFusionRegistry,
+) {
+  const declaration = helperDeclaration(operation, registry);
+  const output = declaration.params[0];
+  if (
+    !output ||
+    output.mode !== "inout" ||
+    output.type.kind !== "scalar" ||
+    output.type.scalar !== "f32"
+  )
+    throw new Error(
+      `TypeShade operation helper ${operation.helperName} has no validated @inout f32 output.`,
+    );
+  const expectedInputs = operation.helperInputNames;
+  if (declaration.params.length !== expectedInputs.length + 1)
+    throw new Error(
+      `TypeShade operation helper ${operation.helperName} has an unexpected parameter count.`,
+    );
+
+  const params: Record<string, typeof f32T> = { [output.name]: f32T };
+  for (let index = 0; index < expectedInputs.length; index++) {
+    const parameter = declaration.params[index + 1];
+    if (
+      !parameter ||
+      parameter.name !== expectedInputs[index] ||
+      parameter.mode !== undefined ||
+      parameter.type.kind !== "scalar" ||
+      parameter.type.scalar !== "f32"
+    )
+      throw new Error(
+        `TypeShade operation helper ${operation.helperName} input signature no longer matches its registered ports.`,
+      );
+    params[parameter.name] = f32T;
+  }
+  if (declaration.ret.kind !== "void")
+    throw new Error(
+      `TypeShade operation helper ${operation.helperName} must return void.`,
+    );
+  return externFn(declaration.name, params, voidT);
+}
+
+function resolveValue(
+  reference: ElementwiseFusionValueRef,
+  inputs: StorageBuffer<ReadonlyNode<"f32">>[],
+  values: ReadonlyNode<"f32">[],
+  index: ReadonlyNode<"u32">,
+): ReadonlyNode<"f32"> {
+  if (reference.kind === "leaf") {
+    const input = inputs[reference.slot];
+    if (!input)
+      throw new Error(
+        `Fusion graph references missing input slot ${reference.slot}.`,
+      );
+    return input.at(index);
+  }
+  const value = values[reference.id];
+  if (!value)
+    throw new Error(
+      `Fusion graph references a value before it is defined: ${reference.id}.`,
+    );
+  return value;
+}
+
+function buildModule(
+  candidate: ElementwiseFusionCandidate,
+  registry: ElementwiseFusionRegistry,
+): ModuleDecl {
   const shape = uniformStruct(
     "FusionShape",
     { group: 0, binding: 0, as: "shape" },
@@ -104,31 +169,62 @@ function buildModule(candidate: ElementwiseFusionCandidate): ModuleDecl {
     binding: inputs.length + 1,
     access: "read_write",
   });
+  const operations = new Map(
+    candidate.steps.map((step) => [step.operation.helperName, step.operation]),
+  );
+  const helpers = [...operations.values()].map((operation) =>
+    helperDeclaration(operation, registry),
+  );
+  const calls = new Map(
+    [...operations.values()].map((operation) => [
+      operation.helperName,
+      helperCall(operation, registry),
+    ]),
+  );
+
   const kernel = fn(
     ELEMENTWISE_FUSION_ENTRY,
     { gid: builtin("global_invocation_id", vec3uT) },
     voidT,
-    ({ gid }) => {
+    ({ gid }, builder) => {
       If(gid.x.ge(shape.field.length), () => Return());
+      const values: ReadonlyNode<"f32">[] = [];
+      for (const step of candidate.steps) {
+        const definition = calls.get(step.operation.helperName);
+        if (!definition)
+          throw new Error(
+            `No call handle was created for ${step.operation.helperName}.`,
+          );
+        const result = builder.var(`value${step.id}`, f32T, f32(0));
+        const arguments_ = step.inputs.map((reference) =>
+          resolveValue(reference, inputs, values, gid.x),
+        );
+        builder.call(definition(result, ...arguments_));
+        values[step.id] = result;
+      }
       output
         .at(gid.x)
-        .assign(lowerExpression(candidate.expression, inputs, gid.x));
+        .assign(resolveValue(candidate.outputValue, inputs, values, gid.x));
     },
     { stage: "compute", workgroupSize: WORKGROUP_SIZE },
   );
 
-  return module({ uses: [shape, ...inputs, output], funcs: [kernel] });
+  return module({
+    uses: [shape, ...inputs, output],
+    funcs: [...helpers, kernel],
+  });
 }
 
-/** Build/cache the authoritative ModuleDecl lowered from the walked Tensor expression. */
+/** Build/cache the authoritative ModuleDecl lowered from registered graph operations. */
 export function elementwiseFusionProgram(
   candidate: ElementwiseFusionCandidate,
+  registry: ElementwiseFusionRegistry = ELEMENTWISE_FUSION_REGISTRY,
 ): ElementwiseFusionProgram {
-  const signature = `f32:${WORKGROUP_SIZE}:${expressionSignature(candidate.expression)}`;
+  const signature = `${registry.fingerprint}:${candidate.signature}:workgroup=${WORKGROUP_SIZE}`;
   const cached = programs.get(signature);
   if (cached) return cached.shared;
 
-  const sharedModule = buildModule(candidate);
+  const sharedModule = buildModule(candidate, registry);
   const shared: ElementwiseFusionProgram = {
     signature,
     module: sharedModule,
@@ -142,8 +238,9 @@ export function elementwiseFusionProgram(
 /** Compile CPU code only when the graph is executed on the CPU backend. */
 export function elementwiseFusionCpuProgram(
   candidate: ElementwiseFusionCandidate,
+  registry: ElementwiseFusionRegistry = ELEMENTWISE_FUSION_REGISTRY,
 ): ElementwiseFusionCpuProgram {
-  const shared = elementwiseFusionProgram(candidate);
+  const shared = elementwiseFusionProgram(candidate, registry);
   const cached = programs.get(shared.signature)!;
   if (cached.cpu) return cached.cpu;
 
@@ -168,8 +265,9 @@ export function elementwiseFusionCpuProgram(
 /** Pack the same ModuleDecl only when the graph is executed on the GPU backend. */
 export function elementwiseFusionGpuProgram(
   candidate: ElementwiseFusionCandidate,
+  registry: ElementwiseFusionRegistry = ELEMENTWISE_FUSION_REGISTRY,
 ): ElementwiseFusionGpuProgram {
-  const shared = elementwiseFusionProgram(candidate);
+  const shared = elementwiseFusionProgram(candidate, registry);
   const cached = programs.get(shared.signature)!;
   if (!cached.pack) cached.pack = packModule(shared.module);
   return { ...shared, pack: cached.pack };

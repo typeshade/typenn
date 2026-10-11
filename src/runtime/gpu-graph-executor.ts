@@ -18,6 +18,13 @@ import { elementwiseFusionGpuProgram } from "./elementwise-fusion-ir.js";
 
 const WORKGROUP_SIZE = 64;
 
+/** Internal observation/injection points for deterministic planner boundary tests. */
+export interface GpuFusionExecutorHooks {
+  readonly maxStorageBuffers?: number;
+  readonly onAnalysis?: (decision: ElementwiseFusionDecision) => void;
+  readonly onResource?: (resource: "output-allocation" | "fusion-pack") => void;
+}
+
 export class GpuGraphExecutor {
   private readonly fusionPipelines = new Map<string, Promise<unknown>>();
 
@@ -29,17 +36,32 @@ export class GpuGraphExecutor {
       decision: ElementwiseFusionDecision,
       dispatches: number,
     ) => void,
+    private readonly fusionHooks?: GpuFusionExecutorHooks,
   ) {}
 
   async execute(tensor: Tensor): Promise<Float32Array> {
     const frame = this.runtime.frame();
     let dispatches = 0;
     const scheduled = new Map<Tensor, Promise<Resident<Float32Array>>>();
-    const analysis = analyzeElementwiseFusion(tensor);
+    const deviceStorageLimit =
+      this.runtime.tier === "webgpu"
+        ? (
+            this.runtime.device as {
+              readonly limits?: {
+                readonly maxStorageBuffersPerShaderStage?: number;
+              };
+            }
+          ).limits?.maxStorageBuffersPerShaderStage
+        : undefined;
+    const analysis = analyzeElementwiseFusion(tensor, {
+      maxStorageBuffers:
+        this.fusionHooks?.maxStorageBuffers ?? deviceStorageLimit,
+    });
     const candidate = "decision" in analysis ? analysis : undefined;
     const decision: ElementwiseFusionDecision = candidate
       ? candidate.decision
       : (analysis as ElementwiseFusionDecision);
+    this.fusionHooks?.onAnalysis?.(decision);
     const dispatched = () => dispatches++;
     const result = candidate
       ? await this.scheduleFused(
@@ -63,6 +85,7 @@ export class GpuGraphExecutor {
     scheduled: Map<Tensor, Promise<Resident<Float32Array>>>,
   ): Promise<Resident<Float32Array>> {
     const length = sizeOf(tensor.shape);
+    this.fusionHooks?.onResource?.("output-allocation");
     const output = this.buffers.track(resident(new Float32Array(length)));
     if (length === 0) {
       tensor.setMaterialized(output);
@@ -70,6 +93,7 @@ export class GpuGraphExecutor {
     }
 
     try {
+      this.fusionHooks?.onResource?.("fusion-pack");
       const program = elementwiseFusionGpuProgram(candidate);
       const [inputs, pipeline] = await Promise.all([
         Promise.all(

@@ -72,6 +72,11 @@ import atanPack from "../kernels/atan.shade.ts";
 import atanhPack from "../kernels/atanh.shade.ts";
 import stepPack from "../kernels/step.shade.ts";
 import reshapePack from "../kernels/reshape.shade.ts";
+import type { FuncDecl } from "typeshade";
+import {
+  ELEMENTWISE_OP_DECLARATIONS,
+  ELEMENTWISE_OP_IR_FINGERPRINT,
+} from "./elementwise-op-declarations.generated.js";
 
 type BinaryOperation =
   "add" | "sub" | "mul" | "div" | "maximum" | "minimum" | "pow" | "prelu";
@@ -294,3 +299,69 @@ export const ENTRYPOINT: Record<Operation, string> = {
   step: "stepKernel",
   reshape: "reshapeKernel",
 };
+
+/** Tensor node fields consumed by the helper's named scalar inputs. */
+export interface ElementwiseFusionOperation {
+  readonly name: string;
+  readonly nodeKind: "binary" | "relu";
+  readonly inputFields: readonly string[];
+  readonly helperName: string;
+  readonly helperInputNames: readonly string[];
+}
+
+export interface ElementwiseFusionRegistry {
+  readonly fingerprint: string;
+  readonly operations: Readonly<Record<string, ElementwiseFusionOperation>>;
+  readonly helpers: ReadonlyMap<string, FuncDecl>;
+}
+
+/**
+ * Build-time extracted TypeShade functions are the scalar operation implementations used by
+ * both standalone kernels and the graph composer. The graph planner only uses this port table
+ * to connect Tensor edges; it never selects an arithmetic formula.
+ */
+export const ELEMENTWISE_FUSION_OPS: Readonly<
+  Record<string, ElementwiseFusionOperation>
+> = {
+  add: {
+    name: "add",
+    nodeKind: "binary",
+    inputFields: ["a", "b"],
+    helperName: "typennAddF32",
+    helperInputNames: ["left", "right"],
+  },
+  mul: {
+    name: "mul",
+    nodeKind: "binary",
+    inputFields: ["a", "b"],
+    helperName: "typennMulF32",
+    helperInputNames: ["left", "right"],
+  },
+  relu: {
+    name: "relu",
+    nodeKind: "relu",
+    inputFields: ["input"],
+    helperName: "typennReluF32",
+    helperInputNames: ["inputValue"],
+  },
+};
+
+export function createElementwiseFusionRegistry(input: {
+  readonly declarations: readonly FuncDecl[];
+  readonly fingerprint: string;
+}): ElementwiseFusionRegistry {
+  return {
+    fingerprint: input.fingerprint,
+    operations: ELEMENTWISE_FUSION_OPS,
+    helpers: new Map(
+      input.declarations.map((declaration) => [declaration.name, declaration]),
+    ),
+  };
+}
+
+export const ELEMENTWISE_FUSION_REGISTRY = createElementwiseFusionRegistry({
+  declarations: ELEMENTWISE_OP_DECLARATIONS,
+  fingerprint: ELEMENTWISE_OP_IR_FINGERPRINT,
+});
+
+export const ELEMENTWISE_OP_HELPERS = ELEMENTWISE_FUSION_REGISTRY.helpers;

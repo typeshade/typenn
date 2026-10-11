@@ -1,5 +1,10 @@
 import { sameShape, sizeOf } from "../tensor/shape.js";
+import type { TensorNode } from "../tensor/node.js";
 import { Tensor } from "../tensor/tensor.js";
+import {
+  ELEMENTWISE_FUSION_OPS,
+  type ElementwiseFusionOperation,
+} from "./kernel-registry.js";
 
 export type ElementwiseFusionRefusalCode =
   | "unsupported-output"
@@ -10,12 +15,13 @@ export type ElementwiseFusionRefusalCode =
   | "shape-mismatch"
   | "aliased-leaf"
   | "observable-intermediate"
-  | "materialized-intermediate";
+  | "materialized-intermediate"
+  | "storage-buffer-limit";
 
 export type ElementwiseFusionDecision =
   | {
       readonly status: "fused";
-      readonly operations: 3;
+      readonly operations: number;
       readonly dispatches: 1;
     }
   | {
@@ -24,24 +30,28 @@ export type ElementwiseFusionDecision =
       readonly reason: string;
     };
 
-export type ElementwiseFusionExpression =
-  | { readonly kind: "input"; readonly slot: number }
-  | {
-      readonly kind: "add" | "mul";
-      readonly left: ElementwiseFusionExpression;
-      readonly right: ElementwiseFusionExpression;
-    }
-  | { readonly kind: "relu"; readonly input: ElementwiseFusionExpression };
+export type ElementwiseFusionValueRef =
+  | { readonly kind: "leaf"; readonly slot: number }
+  | { readonly kind: "value"; readonly id: number };
+
+export interface ElementwiseFusionStep {
+  readonly id: number;
+  readonly operation: ElementwiseFusionOperation;
+  readonly inputs: readonly ElementwiseFusionValueRef[];
+}
 
 export interface ElementwiseFusionCandidate {
   readonly decision: Extract<ElementwiseFusionDecision, { status: "fused" }>;
   readonly output: Tensor;
-  /** Lowered expression derived by walking the original Tensor nodes. */
-  readonly expression: ElementwiseFusionExpression;
+  /** Pure operation calls in postorder, derived from Tensor node references. */
+  readonly steps: readonly ElementwiseFusionStep[];
+  /** Operation names in the same postorder, exposed for diagnostics. */
+  readonly operations: readonly string[];
+  readonly outputValue: ElementwiseFusionValueRef;
   /** Distinct input leaves in first-visit graph order. */
   readonly leaves: readonly Tensor[];
-  /** Operation order as observed by the graph walk. */
-  readonly operations: readonly ("add" | "mul" | "relu")[];
+  /** Structural cache key; contains no Tensor identities or element values. */
+  readonly signature: string;
 }
 
 const consumers = new WeakMap<Tensor, WeakRef<Tensor>[]>();
@@ -54,17 +64,24 @@ export function registerTensorConsumers(output: Tensor, node: object): void {
     ),
   );
   for (const parent of parents) {
-    const refs = liveConsumers(parent);
+    const refs = liveConsumerRefs(parent);
     refs.push(new WeakRef(output));
     consumers.set(parent, refs);
   }
 }
 
-function liveConsumers(tensor: Tensor): WeakRef<Tensor>[] {
+function liveConsumerRefs(tensor: Tensor): WeakRef<Tensor>[] {
   const refs = consumers.get(tensor) ?? [];
-  const live = refs.filter((ref) => ref.deref() !== undefined);
-  if (live.length !== refs.length) consumers.set(tensor, live);
-  return live;
+  const liveRefs = refs.filter((ref) => ref.deref() !== undefined);
+  if (liveRefs.length !== refs.length) consumers.set(tensor, liveRefs);
+  return liveRefs;
+}
+
+function liveConsumers(tensor: Tensor): Tensor[] {
+  return liveConsumerRefs(tensor).flatMap((ref) => {
+    const value = ref.deref();
+    return value ? [value] : [];
+  });
 }
 
 function refuse(
@@ -74,37 +91,50 @@ function refuse(
   return { status: "refused", code, reason };
 }
 
-function walkExpression(
-  tensor: Tensor,
-  leaves: Tensor[],
-  operations: ("add" | "mul" | "relu")[],
-): ElementwiseFusionExpression | undefined {
-  const node = tensor.node;
-  if (node.kind === "input") {
-    const slot = leaves.indexOf(tensor);
-    if (slot >= 0) return { kind: "input", slot };
-    leaves.push(tensor);
-    return { kind: "input", slot: leaves.length - 1 };
-  }
-  if (node.kind === "relu") {
-    const input = walkExpression(node.input, leaves, operations);
-    if (!input) return undefined;
-    operations.push("relu");
-    return { kind: "relu", input };
-  }
-  if (node.kind === "binary" && (node.op === "add" || node.op === "mul")) {
-    const left = walkExpression(node.a, leaves, operations);
-    const right = walkExpression(node.b, leaves, operations);
-    if (!left || !right) return undefined;
-    operations.push(node.op);
-    return { kind: node.op, left, right };
-  }
-  return undefined;
+function operationForNode(
+  node: TensorNode,
+): ElementwiseFusionOperation | undefined {
+  const operation = "op" in node ? node.op : node.kind;
+  const definition = ELEMENTWISE_FUSION_OPS[operation as string];
+  if (!definition || definition.nodeKind !== node.kind) return undefined;
+  return definition;
 }
 
-/** Analyze the narrow same-shape add -> mul -> relu pattern for safe fusion. */
+function inputTensors(
+  node: TensorNode,
+  operation: ElementwiseFusionOperation,
+): Tensor[] | undefined {
+  const record = node as unknown as Record<string, unknown>;
+  const inputs: Tensor[] = [];
+  for (const field of operation.inputFields) {
+    const input = record[field];
+    if (!(input instanceof Tensor)) return undefined;
+    inputs.push(input);
+  }
+  return inputs;
+}
+
+function structuralSignature(
+  steps: readonly ElementwiseFusionStep[],
+  outputValue: ElementwiseFusionValueRef,
+): string {
+  const topology = steps.map((step) => ({
+    operation: step.operation.name,
+    inputs: step.inputs.map((input) =>
+      input.kind === "leaf" ? ["leaf", input.slot] : ["value", input.id],
+    ),
+  }));
+  const output =
+    outputValue.kind === "leaf"
+      ? ["leaf", outputValue.slot]
+      : ["value", outputValue.id];
+  return `f32:${JSON.stringify({ topology, output })}`;
+}
+
+/** Walk a pure same-shape Tensor DAG and lower registered elementwise operations. */
 export function analyzeElementwiseFusion(
   output: Tensor,
+  options: { readonly maxStorageBuffers?: number } = {},
 ): ElementwiseFusionCandidate | ElementwiseFusionDecision {
   output.assertUsable();
   if (output.getMaterialized() !== undefined)
@@ -113,108 +143,163 @@ export function analyzeElementwiseFusion(
       "The requested output is already materialized and will be reused without fusion.",
     );
 
-  if (output.node.kind !== "relu")
-    return refuse(
-      "unsupported-output",
-      "Fusion currently supports only a ReLU output.",
-    );
+  const leaves: Tensor[] = [];
+  const leafSlots = new Map<Tensor, number>();
+  const values = new Map<Tensor, ElementwiseFusionValueRef>();
+  const candidateTensors = new Set<Tensor>();
+  const visiting = new Set<Tensor>();
+  const steps: ElementwiseFusionStep[] = [];
+  let refusal: ElementwiseFusionDecision | undefined;
 
-  const multiply = output.node.input;
-  if (multiply.node.kind !== "binary" || multiply.node.op !== "mul")
-    return refuse(
-      "unsupported-chain",
-      "Fusion requires ReLU(Multiply(Add(a, b), c)).",
-    );
+  const walk = (tensor: Tensor): ElementwiseFusionValueRef | undefined => {
+    tensor.assertUsable();
+    const previous = values.get(tensor);
+    if (previous) return previous;
+    if (visiting.has(tensor)) {
+      refusal ??= refuse(
+        "unsupported-chain",
+        "The Tensor graph contains a cycle and cannot be lowered safely.",
+      );
+      return undefined;
+    }
+    if (tensor.requiresGrad) {
+      refusal ??= refuse(
+        "requires-grad",
+        "Fusion is disabled when any candidate tensor requires gradients because backward activations are not retained.",
+      );
+      return undefined;
+    }
+    if (!sameShape(output.shape, tensor.shape)) {
+      refusal ??= refuse(
+        "shape-mismatch",
+        "Fusion supports only exact same-shape operands without broadcasting.",
+      );
+      return undefined;
+    }
 
-  const addOperands = [multiply.node.a, multiply.node.b].filter(
-    (operand) => operand.node.kind === "binary" && operand.node.op === "add",
-  );
-  if (addOperands.length !== 1)
-    return refuse(
-      "unsupported-chain",
-      "Fusion requires exactly one add intermediate consumed by multiply.",
-    );
+    const node = tensor.node;
+    if (node.kind === "input") {
+      let slot = leafSlots.get(tensor);
+      if (slot === undefined) {
+        slot = leaves.length;
+        leafSlots.set(tensor, slot);
+        leaves.push(tensor);
+      }
+      const reference: ElementwiseFusionValueRef = { kind: "leaf", slot };
+      values.set(tensor, reference);
+      return reference;
+    }
 
-  const add = addOperands[0]!;
-  const multiplier =
-    add === multiply.node.a ? multiply.node.b : multiply.node.a;
-  if (add.node.kind !== "binary")
-    return refuse("unsupported-chain", "The add intermediate is malformed.");
-  const { a: addA, b: addB } = add.node;
-  const candidateNodes = [output, multiply, add, addA, addB, multiplier];
-  if (candidateNodes.some((tensor) => tensor.requiresGrad))
-    return refuse(
-      "requires-grad",
-      "Fusion is disabled when any candidate tensor requires gradients because backward activations are not retained.",
-    );
+    const operation = operationForNode(node);
+    if (!operation) {
+      refusal ??= refuse(
+        "unsupported-chain",
+        `Fusion has no registered pure elementwise implementation for Tensor node ${node.kind}${"op" in node ? `/${node.op}` : ""}.`,
+      );
+      return undefined;
+    }
 
-  if (
-    addA.node.kind !== "input" ||
-    addB.node.kind !== "input" ||
-    multiplier.node.kind !== "input"
-  )
-    return refuse(
-      "unsupported-leaf",
-      "Fusion currently requires three input leaves; nested or computed operands use the unfused path.",
-    );
+    if (tensor.getMaterialized() !== undefined) {
+      refusal ??= refuse(
+        "materialized-intermediate",
+        "A computed intermediate is already materialized; the unfused path preserves its observable value.",
+      );
+      return undefined;
+    }
 
-  if (new Set([addA, addB, multiplier]).size !== 3)
-    return refuse(
-      "aliased-leaf",
-      "Fusion requires three distinct input tensors; aliased operands use the unfused path.",
-    );
+    const inputs = inputTensors(node, operation);
+    if (!inputs) {
+      refusal ??= refuse(
+        "unsupported-chain",
+        `Tensor node ${operation.name} does not provide the registered input fields.`,
+      );
+      return undefined;
+    }
 
-  if (
-    !sameShape(addA.shape, addB.shape) ||
-    !sameShape(addA.shape, multiplier.shape) ||
-    !sameShape(addA.shape, add.shape) ||
-    !sameShape(addA.shape, multiply.shape) ||
-    !sameShape(addA.shape, output.shape)
-  )
-    return refuse(
-      "shape-mismatch",
-      "Fusion supports only exact same-shape operands without broadcasting.",
-    );
+    visiting.add(tensor);
+    candidateTensors.add(tensor);
+    const references: ElementwiseFusionValueRef[] = [];
+    for (const input of inputs) {
+      if (!sameShape(output.shape, input.shape)) {
+        refusal ??= refuse(
+          "shape-mismatch",
+          "Fusion supports only exact same-shape operands without broadcasting.",
+        );
+        visiting.delete(tensor);
+        return undefined;
+      }
+      const reference = walk(input);
+      if (!reference) {
+        visiting.delete(tensor);
+        return undefined;
+      }
+      references.push(reference);
+    }
+    visiting.delete(tensor);
 
-  if (
-    add.getMaterialized() !== undefined ||
-    multiply.getMaterialized() !== undefined
-  )
-    return refuse(
-      "materialized-intermediate",
-      "An add or multiply intermediate is already materialized; the unfused path preserves its observable value.",
-    );
+    const step: ElementwiseFusionStep = {
+      id: steps.length,
+      operation,
+      inputs: references,
+    };
+    steps.push(step);
+    const reference: ElementwiseFusionValueRef = { kind: "value", id: step.id };
+    values.set(tensor, reference);
+    return reference;
+  };
 
-  if (liveConsumers(add).length !== 1 || liveConsumers(multiply).length !== 1)
-    return refuse(
-      "observable-intermediate",
-      "The add and multiply intermediates must each have exactly one live consumer.",
-    );
-
+  let outputValue: ElementwiseFusionValueRef | undefined;
   try {
     sizeOf(output.shape);
+    outputValue = walk(output);
   } catch {
     return refuse(
       "shape-mismatch",
       "The output shape cannot be represented safely.",
     );
   }
-
-  const leaves: Tensor[] = [];
-  const operations: ("add" | "mul" | "relu")[] = [];
-  const expression = walkExpression(output, leaves, operations);
-  if (!expression || operations.length !== 3 || leaves.length !== 3)
+  if (refusal) return refusal;
+  if (!outputValue || steps.length < 2 || leaves.length === 0)
     return refuse(
-      "unsupported-chain",
-      "The candidate graph could not be lowered as one add, one multiply, and one ReLU.",
+      "unsupported-output",
+      "Fusion requires an output graph with at least two registered elementwise operations and one input leaf.",
+    );
+
+  for (const intermediate of candidateTensors) {
+    if (intermediate === output) continue;
+    if (
+      liveConsumers(intermediate).some(
+        (consumer) => !candidateTensors.has(consumer),
+      )
+    )
+      return refuse(
+        "observable-intermediate",
+        "A computed intermediate has a consumer outside the candidate graph; the unfused path preserves its observable value.",
+      );
+  }
+
+  const storageBufferCount = leaves.length + 1;
+  if (
+    options.maxStorageBuffers !== undefined &&
+    storageBufferCount > options.maxStorageBuffers
+  )
+    return refuse(
+      "storage-buffer-limit",
+      `The fused entry needs ${storageBufferCount} storage buffers (${leaves.length} distinct input leaves plus one output), exceeding this WebGPU device limit of ${options.maxStorageBuffers}; the unfused path will be used.`,
     );
 
   return {
-    decision: { status: "fused", operations: operations.length, dispatches: 1 },
+    decision: {
+      status: "fused",
+      operations: steps.length,
+      dispatches: 1,
+    },
     output,
-    expression,
+    steps,
+    operations: steps.map((step) => step.operation.name),
+    outputValue,
     leaves,
-    operations,
+    signature: structuralSignature(steps, outputValue),
   };
 }
 

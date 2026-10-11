@@ -2,6 +2,7 @@ import { mkdir, readdir, rm, unlink } from "node:fs/promises";
 import { build as bundle } from "esbuild";
 import { build as viteBuild } from "vite";
 import { execFileSync } from "node:child_process";
+import { generateElementwiseOpIr } from "./build-elementwise-op-ir.mjs";
 
 const configDir = ".typenn-build";
 
@@ -33,6 +34,7 @@ await bundle({
 });
 
 try {
+  await generateElementwiseOpIr();
   await viteBuild({ configFile: `${configDir}/vite.config.mjs` });
   execFileSync(
     process.execPath,
@@ -44,5 +46,9 @@ try {
 } finally {
   // Keep generated TypeShade views available to tsc, but out of the source tree afterward.
   await removeGeneratedShadeViews("src");
+  await rm("src/runtime/elementwise-op-declarations.generated.ts", {
+    force: true,
+  });
+  await rm(`${configDir}/generate-elementwise-op-ir.mjs`, { force: true });
 }
 await rm("dist/types/kernels", { recursive: true, force: true });

@@ -5,6 +5,7 @@ import { analyzeElementwiseFusion } from "./elementwise-fusion.js";
 import {
   dispatchElementwiseFusionCpu,
   elementwiseFusionCpuProgram,
+  type ElementwiseFusionCpuProgram,
 } from "./elementwise-fusion-ir.js";
 import {
   executeBinary,
@@ -69,6 +70,8 @@ export interface CpuGraphExecution {
   readonly decision: ElementwiseFusionDecision | undefined;
   /** Count of actual fused TypeShade CPU compute entry dispatches. */
   readonly dispatches: number;
+  /** Exact composed module used by this execution, when fusion ran. */
+  readonly fusionProgram?: ElementwiseFusionCpuProgram;
 }
 
 interface CpuExecutionContext {
@@ -77,6 +80,7 @@ interface CpuExecutionContext {
   readonly writeMaterialized: boolean;
   readonly pending: Map<Tensor, Promise<Float32Array>>;
   dispatches: number;
+  fusionProgram?: ElementwiseFusionCpuProgram;
 }
 
 const pendingGraphEvaluations = new WeakMap<
@@ -135,7 +139,12 @@ async function executeCpuGraph(
     dispatches: 0,
   };
   const value = await evaluateNode(tensor, context);
-  return { value, decision, dispatches: context.dispatches };
+  return {
+    value,
+    decision,
+    dispatches: context.dispatches,
+    fusionProgram: context.fusionProgram,
+  };
 }
 
 function evaluateNode(
@@ -155,6 +164,7 @@ function evaluateNode(
       const analysis = analyzeElementwiseFusion(tensor);
       if ("decision" in analysis) {
         const program = elementwiseFusionCpuProgram(analysis);
+        context.fusionProgram = program;
         const length = sizeOf(tensor.shape);
         const leaves = analysis.leaves.map((leaf) => {
           if (leaf.node.kind !== "input")

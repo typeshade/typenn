@@ -164,18 +164,22 @@ device per JavaScript context. Trainer support is limited to a single `Linear` c
 
 ### Elementwise graph fusion
 
-For an eligible same-shape `a.add(b).mul(c).relu()` graph, TypeNN walks the actual
-Tensor nodes and their operand order into a TypeShade `ModuleDecl`. That shared
-IR produces the CPU implementation through `compileModuleJs` and the GPU pack
-through `packModule`; it is not a separately authored fused shader. Structural
-program caches reuse code while binding the current graph's input values.
+For an eligible same-shape Tensor DAG, TypeNN walks the actual nodes in
+postorder and connects them to the registered scalar helpers extracted from
+the `.shade.ts` kernel sources. The initial registry contains add, multiply,
+and ReLU; any sequence of at least two registered operations can share one
+TypeShade `ModuleDecl`. Repeated input leaves and shared internal results are
+reused safely within the invocation. That shared IR produces the CPU
+implementation through `compileModuleJs` and the GPU pack through `packModule`.
+Structural program caches include helper-source fingerprints while binding
+current graph input values at execution time.
 
-The initial scope is deliberately limited to this three-operation chain with
-three distinct input tensors. Broadcasting, computed or aliased operands,
-gradient-requiring tensors, materialized intermediates, and externally consumed
-intermediates use the existing nodewise execution path. Fusion preserves the
-original Tensor DAG for later intermediate reads and autograd. A wrapped chain
-is not partially fused: selection applies to the requested output.
+Broadcasting, gradient-requiring tensors, materialized intermediates, and
+intermediates with consumers outside the requested candidate use the existing
+nodewise execution path. Fusion preserves the original Tensor DAG for later
+intermediate reads and autograd. A wrapped chain is not partially fused:
+selection applies to the requested output. On WebGPU, fusion is also refused
+when its distinct input and output storage buffers exceed the device limit.
 
 The CPU path normally executes emitted JavaScript. If a content security policy
 blocks dynamic code generation, it uses the TypeShade interpreter for the same

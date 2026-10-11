@@ -16,6 +16,10 @@ declare const b: storage<array<f32>>;
 
 declare const output: storage<array<f32>, "read_write">;
 
+function typennMulF32(@inout result: f32, left: f32, right: f32): void {
+  result = left * right;
+}
+
 function operandIndex(flatIndex: u32, strides: array<u32, 8>): u32 {
   let remaining: u32 = flatIndex;
   let index: u32 = 0;
@@ -32,7 +36,11 @@ export function mulKernel(@builtin("global_invocation_id") gid: vec3u) {
   if (gid.x >= shape.length) {
     return;
   }
-  output[gid.x] =
-    a[operandIndex(gid.x, shape.aStrides)] *
-    b[operandIndex(gid.x, shape.bStrides)];
+  let value: f32 = 0.0;
+  typennMulF32(
+    value,
+    a[operandIndex(gid.x, shape.aStrides)],
+    b[operandIndex(gid.x, shape.bStrides)],
+  );
+  output[gid.x] = value;
 }

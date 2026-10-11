@@ -48,9 +48,9 @@ const assertParity = (actual, expected, label) => {
       throw new Error(
         `${label}[${index}] is nonfinite: ${value} vs ${reference}.`,
       );
-    const error = Math.abs(value - reference);
+    const error = Math.abs(Math.fround(value) - Math.fround(reference));
     maxAbsoluteError = Math.max(maxAbsoluteError, error);
-    if (error > 1e-5 * Math.max(1, Math.abs(reference)))
+    if (!Object.is(Math.fround(value), Math.fround(reference)))
       throw new Error(
         `${label}[${index}] mismatch: ${value} vs ${reference} (error ${error}).`,
       );
@@ -58,9 +58,13 @@ const assertParity = (actual, expected, label) => {
   return { maxAbsoluteError, comparedElementCount: actual.length };
 };
 const expectedFor = (values) =>
-  values[0].map((_, index) =>
-    Math.max(0, (values[0][index] + values[1][index]) * values[2][index]),
-  );
+  values[0].map((_, index) => {
+    const sum = Math.fround(
+      Math.fround(values[0][index]) + Math.fround(values[1][index]),
+    );
+    const product = Math.fround(sum * Math.fround(values[2][index]));
+    return Math.fround(Math.max(0, product));
+  });
 const makeGraph = (target, values = sampleValues, order = "forward") => {
   const shape = [values[0].length];
   const a = target.tensor(values[0], { shape });
@@ -335,8 +339,7 @@ try {
   if (
     cpuDecision?.status !== "fused" ||
     cpuDispatchCount !== 1 ||
-    (generatedCpuProgram.cpuBackend !== "emitted-js" &&
-      generatedCpuProgram.cpuBackend !== "csp-interpreter-fallback")
+    generatedCpuProgram.cpuBackend !== "emitted-js"
   ) {
     throw new Error(
       `Expected one shared-IR CPU dispatch; got ${JSON.stringify({ cpuDecision, cpuDispatchCount, cpuBackend: generatedCpuProgram.cpuBackend })}.`,

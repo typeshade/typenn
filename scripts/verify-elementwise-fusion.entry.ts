@@ -36,9 +36,13 @@ function graph(
 }
 
 function expected(values: number[][]): number[] {
-  return values[0]!.map((_, index) =>
-    Math.max(0, (values[0]![index]! + values[1]![index]!) * values[2]![index]!),
-  );
+  return values[0]!.map((_, index) => {
+    const sum = Math.fround(
+      Math.fround(values[0]![index]!) + Math.fround(values[1]![index]!),
+    );
+    const product = Math.fround(sum * Math.fround(values[2]![index]!));
+    return Math.fround(Math.max(0, product));
+  });
 }
 
 function assertParity(
@@ -48,9 +52,9 @@ function assertParity(
 ) {
   assert.equal(actual.length, reference.length, `${label} length`);
   for (let index = 0; index < actual.length; index++)
-    assert.ok(
-      Math.abs(actual[index]! - reference[index]!) <=
-        1e-5 * Math.max(1, Math.abs(reference[index]!)),
+    assert.equal(
+      Math.fround(actual[index]!),
+      Math.fround(reference[index]!),
       `${label}[${index}]: ${actual[index]} != ${reference[index]}`,
     );
 }
@@ -99,10 +103,7 @@ export async function runElementwiseFusionVerification(): Promise<void> {
   assert.equal(runtime.lastFusionDecision?.status, "fused");
   assert.equal(runtime.lastDispatchCount, 1);
   const generatedCpu = elementwiseFusionCpuProgram(firstCandidate);
-  assert.ok(
-    generatedCpu.cpuBackend === "emitted-js" ||
-      generatedCpu.cpuBackend === "csp-interpreter-fallback",
-  );
+  assert.equal(generatedCpu.cpuBackend, "emitted-js");
 
   // The independent reference is TypeNN's original nodewise CPU executor.
   const referenceGraph = graph(runtime, baseValues);
@@ -173,7 +174,17 @@ export async function runElementwiseFusionVerification(): Promise<void> {
   const aliasA = tensor(runtime, baseValues[0]!);
   const aliasC = tensor(runtime, baseValues[2]!);
   const aliasedOutput = aliasA.add(aliasA).mul(aliasC).relu();
-  assert.equal(inspectElementwiseFusion(aliasedOutput).code, "aliased-leaf");
+  assert.deepEqual(inspectElementwiseFusion(aliasedOutput), {
+    status: "fused",
+    operations: 3,
+    dispatches: 1,
+  });
+  assertParity(
+    [...(await aliasedOutput.data())],
+    [4, 4, 0, 4],
+    "deduplicated repeated leaf",
+  );
+  assert.equal(runtime.lastDispatchCount, 1);
 
   const shapeA = tensor(runtime, baseValues[0]!);
   const shapeShort = tensor(runtime, [1]);

@@ -1,0 +1,28 @@
+name: Elementwise fusion verification
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      - run: npm run test:fusion
+      - name: Upload fusion verification report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: elementwise-fusion-verification
+          path: .typenn-build/fusion-test-results.json
+          if-no-files-found: warn

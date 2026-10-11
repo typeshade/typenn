@@ -22,6 +22,7 @@
     "build": "node scripts/build.mjs",
     "lint": "node scripts/lint.mjs",
     "test": "npm run build && node scripts/verify-elementwise-fusion.mjs",
+    "test:fusion": "npm run build && node scripts/verify-elementwise-fusion.mjs",
     "build:elementwise-fusion:browser": "node scripts/build-elementwise-fusion-browser.mjs",
     "prepack": "npm run build"
   },
