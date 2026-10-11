@@ -55,6 +55,9 @@ horizontal navigation row.
   content panels, neutral ink, and hairline borders.
 - Use IBM Plex Sans for interface text, IBM Plex Sans KR for Korean glyph coverage, and IBM Plex
   Mono for code and identifiers.
+- Cap the shared header, page frame, and footer at 1440px. Cap overview content at 1320px,
+  reading articles at 940px, and the Playground at 1180px. Use 32px shell gutters on wide
+  screens, 24px below 1050px, 18px below 820px, and 14px below 560px.
 - Use 6px control corners and 8px code/workbench corners. Panels stay flat; reserve shadow for
   the main code sample and avoid decorative gradients.
 - The overview begins with working TypeNN code and the actual result shape. The rest of the page
