@@ -1,0 +1,25 @@
+---
+import SiteLayout from "../../../layouts/SiteLayout.astro";
+import CodeBlock from "../../../components/CodeBlock.astro";
+const code = `import * as nn from "typenn";
+
+const device = await nn.device({ device: "auto" });
+const a = device.tensor([1, 2, 3, 4], { shape: [2, 2] });
+const b = device.tensor([5, 6, 7, 8], { shape: [2, 2] });
+const y = a.matmul(b).relu();
+
+const values = await y.data();
+console.log(values);
+await y.disposeGraph();
+await device.dispose();`;
+---
+<SiteLayout locale="ko" active="start" title="TypeNN 시작하기" description="Device를 만들고 Tensor 그래프를 실행한 뒤 결과를 확인합니다.">
+  <article class="docs-article">
+    <nav class="breadcrumbs" aria-label="Breadcrumb"><a href="/ko/">TypeNN</a><span>/</span><span>시작하기</span></nav>
+    <header class="page-heading"><p class="eyebrow">먼저 시작하기</p><h1>TypeNN 시작하기</h1><p class="lead">Device를 열고 Tensor 연산으로 계산을 정의한 뒤 필요한 결과를 구체화합니다.</p></header>
+    <section class="doc-section" id="install"><h2>프로젝트 상태</h2><p>TypeNN은 프리릴리스 단계입니다. npm 패키지 메타데이터는 아직 placeholder로 표시되어 있으므로 정식 배포 경로가 준비될 때까지 저장소 소스와 예제를 기준으로 확인하세요.</p><p><a class="text-link" href="https://github.com/typeshade/typenn">TypeNN 저장소 열기 ↗</a></p></section>
+    <section class="doc-section" id="first-operation"><h2>첫 연산 실행하기</h2><p><code>device()</code>는 사용 가능한 경우 WebGPU를 선택하고, 아니면 TypeShade CPU 계층으로 폴백합니다. <code>"cpu"</code>, <code>"webgpu"</code>, <code>"webgl2"</code>를 명시할 수도 있습니다. WebGL2는 제한된 실행 경로입니다.</p><CodeBlock title="MatMul 다음에 ReLU 적용" file="first-operation.ts" code={code} /></section>
+    <section class="doc-section" id="what-happens"><h2>실행 시점 이해하기</h2><p>Tensor 메서드는 지연 그래프를 구성합니다. JavaScript로 값을 즉시 읽어오지 않습니다. <code>data()</code>를 호출하면 해당 결과에 필요한 그래프를 실행하고 <code>Float32Array</code>를 호스트로 반환합니다.</p><div class="note"><strong>실행이 끝나기 전에 그래프를 해제하지 마세요.</strong><span>결과 사용 후 <code>disposeGraph()</code>로 중간 Tensor를 정리할 수 있습니다. Device는 작업을 마친 뒤 해제하세요.</span></div></section>
+    <section class="doc-section"><h2>다음 가이드</h2><div class="next-links"><a href="/ko/guide/execution/"><span><strong>실행 모델</strong><small>Tensor 그래프가 커널로 변환되어 디스패치되는 과정을 봅니다.</small></span><b>→</b></a><a href="/ko/guide/training/"><span><strong>모델 학습</strong><small>Module과 옵티마이저 실행 경로를 확인합니다.</small></span><b>→</b></a><a href="/ko/playground/"><span><strong>Playground 실행</strong><small>프로젝트 설정 없이 연산을 실행합니다.</small></span><b>→</b></a></div></section>
+  </article>
+</SiteLayout>

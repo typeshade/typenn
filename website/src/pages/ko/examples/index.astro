@@ -1,0 +1,35 @@
+---
+import SiteLayout from "../../../layouts/SiteLayout.astro";
+import CodeBlock from "../../../components/CodeBlock.astro";
+const model = `export class SimpleMLP extends nn.Module {
+  private readonly flatten: nn.Flatten;
+  private readonly fc1: nn.Linear;
+  private readonly relu: nn.ReLU;
+  private readonly dropout: nn.Dropout;
+  private readonly fc2: nn.Linear;
+
+  constructor() {
+    super();
+    this.flatten = this.register("flatten", new nn.Flatten());
+    this.fc1 = this.register("fc1", new nn.Linear(784, 128));
+    this.relu = this.register("relu", new nn.ReLU());
+    this.dropout = this.register("dropout", new nn.Dropout(0.2));
+    this.fc2 = this.register("fc2", new nn.Linear(128, 10));
+  }
+
+  forward(input: nn.Tensor): nn.Tensor {
+    return this.fc2.forward(this.dropout.forward(
+      this.relu.forward(this.fc1.forward(this.flatten.forward(input))),
+    ));
+  }
+}`;
+---
+<SiteLayout locale="ko" active="examples" title="TypeNN 예제" description="TypeNN 저장소의 MNIST MLP와 Tensor 연산 예제를 살펴봅니다.">
+  <article class="docs-article">
+    <nav class="breadcrumbs" aria-label="Breadcrumb"><a href="/ko/">TypeNN</a><span>/</span><span>예제</span></nav>
+    <header class="page-heading"><p class="eyebrow">예제</p><h1>실행 가능한 코드에서 배우기</h1><p class="lead">예제는 프로젝트 소스 저장소로 연결됩니다. 측정하지 않은 성능이나 학습 결과를 사이트에서 꾸며내지 않습니다.</p></header>
+    <section class="doc-section"><h2>MNIST MLP</h2><p>28×28 이미지를 펼쳐 784 → 128 Dense 계층과 ReLU를 적용한 뒤 10개 클래스의 logits를 계산합니다. 저장소 예제에는 배치 처리, Adam, 정수 레이블 cross entropy와 평가 코드도 포함되어 있습니다.</p><CodeBlock title="모델 정의" file="examples/mnist/model.ts" code={model} /><p><a class="text-link" href="https://github.com/typeshade/typenn/tree/main/examples/mnist">MNIST 소스 탐색 ↗</a></p></section>
+    <section class="doc-section"><h2>Tensor 연산</h2><p>시작하기와 Playground에서 rank-2 MatMul, elementwise 연산, activation, 명시적 결과 읽기를 다룹니다. 동일한 입력으로 CPU와 브라우저에서 사용할 수 있는 백엔드를 확인할 수 있습니다.</p><a class="button button-primary" href="/ko/playground/">Playground 열기 <span aria-hidden="true">→</span></a></section>
+    <section class="doc-section"><h2>추가 소스 예제</h2><div class="link-list"><a href="https://github.com/typeshade/typenn/tree/main/tests"><span><strong>정확도 테스트</strong><small>저장소의 연산 및 기울기 검증입니다.</small></span><b>↗</b></a><a href="https://github.com/typeshade/typenn/blob/main/TODO.md"><span><strong>구현 상태</strong><small>계획된 작업과 알려진 제약입니다.</small></span><b>↗</b></a><a href="https://github.com/typeshade/typeshade"><span><strong>TypeShade 컴파일러</strong><small>TypeNN 커널을 실행하는 컴파일러와 런타임입니다.</small></span><b>↗</b></a></div></section>
+  </article>
+</SiteLayout>

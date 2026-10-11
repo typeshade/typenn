@@ -1,0 +1,21 @@
+---
+import SiteLayout from "../../layouts/SiteLayout.astro";
+import CodeBlock from "../../components/CodeBlock.astro";
+const code = `const input = device.tensor(values, { shape: [batch, features] });
+const logits = input.matmul(weights).add(bias);
+const output = logits.relu();
+
+// This is the materialization boundary.
+const result = await output.data();`;
+---
+<SiteLayout locale="en" active="execution" title="TypeNN execution model" description="How deferred Tensor graphs lower into TypeShade programs and run across supported backends.">
+  <article class="docs-article">
+    <nav class="breadcrumbs" aria-label="Breadcrumb"><a href="/">TypeNN</a><span>/</span><a href="/guide/">Guides</a><span>/</span><span>Execution model</span></nav>
+    <header class="page-heading"><p class="eyebrow">Guides</p><h1>Execution model</h1><p class="lead">TypeNN owns the Tensor graph and its meaning. TypeShade owns kernel compilation and program execution.</p></header>
+    <section class="doc-section"><h2>Tensor calls build a deferred graph</h2><p>Operations such as <code>matmul()</code>, <code>add()</code>, and <code>relu()</code> create graph nodes with shape and operation metadata. This graph is separate from TypeShade Shader IR.</p><CodeBlock title="A small Tensor graph" file="model.ts" code={code} /></section>
+    <section class="doc-section"><h2>Materialization executes reachable work</h2><p>When <code>data()</code> is requested, TypeNN traverses the dependency graph. The CPU tier evaluates compiled TypeShade programs. GPU execution prepares resident inputs, records program dispatches in a TypeShade Frame, submits the work, and reads back only the requested output.</p><div class="execution-lanes"><div><span class="lane-label">TypeNN</span><p>Shape checks · graph nodes · autograd · execution order</p></div><div><span class="lane-label">TypeShade</span><p>Shader IR · backend programs · dispatch · runtime resources</p></div></div></section>
+    <section class="doc-section"><h2>Backends and limits</h2><div class="backend-table" role="table" aria-label="Backend support"><div class="table-row table-head" role="row"><span role="columnheader">Tier</span><span role="columnheader">Selection</span><span role="columnheader">Current note</span></div><div class="table-row" role="row"><strong role="cell">CPU</strong><span role="cell">Auto fallback or explicit</span><span role="cell">TypeShade CPU tier; suitable for correctness and fallback.</span></div><div class="table-row" role="row"><strong role="cell">WebGPU</strong><span role="cell">Auto or explicit</span><span role="cell">Native GPU compute when the browser exposes an adapter.</span></div><div class="table-row" role="row"><strong role="cell">WebGL2</strong><span role="cell">Explicit</span><span role="cell">Constrained compute lowering; performance depends on passes and device.</span></div></div><p class="fine-print">One active TypeNN Device is supported per JavaScript context because TypeShade call-layer configuration is process-global.</p></section>
+    <section class="doc-section"><h2>A Frame is not fusion</h2><p>A Frame can collect multiple dispatches and submit them in order. The current Tensor executor still dispatches a kernel per graph node. It does not remove intermediate storage through general elementwise kernel fusion.</p><p><a class="text-link" href="https://github.com/typeshade/typenn/blob/main/TODO.md">See graph optimization status ↗</a></p></section>
+    <nav class="doc-pagination"><a href="/guide/"><small>Previous</small><strong>Get started</strong></a><a href="/guide/training/"><small>Next</small><strong>Training</strong><span>→</span></a></nav>
+  </article>
+</SiteLayout>

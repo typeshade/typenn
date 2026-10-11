@@ -1,65 +1,81 @@
 # TypeNN site design
 
-This site follows the design language and product-writing rules from the official TypeShade
-site. The source documents are preserved in `references/typeshade-site/`; this document records
-the TypeNN-specific choices.
+The TypeNN site keeps the TypeShade site's Ant Design and IBM Plex visual language while
+organizing content as a developer site with an overview, guides, API reference, runnable
+Playground, and linked source examples. TensorFlow.js is an information-architecture reference:
+clear learning paths and a visible try-it-now experience. Its layout, writing, graphics, and
+brand are not copied.
 
-## Source
+## Sources and product truth
 
-- TypeShade site design: `references/typeshade-site/DESIGN.md`
-- TypeShade site product brief: `references/typeshade-site/PRODUCT.md`
-- Source repository: `https://github.com/typeshade/typeshade.github.io`
-- Source commit: `55bde15993e7df5015be20c01646399210be60ba`
+- Source design inspiration: `references/typeshade-site/DESIGN.md`
+- Source product brief: `references/typeshade-site/PRODUCT.md`
 - TypeNN implementation: `https://github.com/typeshade/typenn`
+- TypeShade compiler and runtime: `https://github.com/typeshade/typeshade`
+- Current user flow: overview → get started → guides/API → Playground or source examples.
+
+Use current source, tests, README, and TODO as evidence. Distinguish TypeNN's Tensor graph from
+TypeShade Shader IR. A submitted Frame is not kernel fusion. Do not invent benchmark values,
+hardware details, generated compiler output, model results, or support guarantees.
 
 ## Stack
 
-- Astro renders the static English `/` and Korean `/ko/` pages.
-- React supplies hydrated interactive islands for code tabs and the theme control.
-- TailwindCSS v4 styles the page layout and responsive utilities.
-- Ant Design v5 supplies the interactive tabs, buttons, and theme switch. Its palette and
-  component tokens follow the TypeShade site's design language.
+- Astro generates static English routes at `/` and Korean routes at `/ko/`.
+- React hydrates only interactive islands: the theme control and the Playground.
+- TailwindCSS v4 handles layout utilities and Ant Design v5 provides real interactive controls.
 - IBM Plex Sans, IBM Plex Sans KR, and IBM Plex Mono are self-hosted under `public/fonts/`.
+- Astro's Shiki `Code` component highlights static TypeScript examples at build time. Prism
+  highlights the live Playground sample.
+- The Playground loads the compiled TypeNN package built at the commit recorded in
+  `src/vendor/typenn/README.md`; it does not reproduce Tensor math in a mock implementation.
 
-## Voice
+## Information architecture
 
-- Write in plain sentences for TypeScript developers.
-- Explain what TypeNN does, then link to source code for implementation detail.
-- Keep each sentence to one idea. Use sentence-case headings.
-- English is the default at `/`; Korean is a separately authored locale at `/ko/`.
-- Use the exact TypeNN APIs and behavior documented in the source repository.
-- Publish no performance numbers, hardware claims, or unsupported roadmap promises.
+- `/` and `/ko/`: product overview, real Tensor code, compiler/execution path, entry points.
+- `/guide/` and `/ko/guide/`: first operation and lifecycle.
+- `/guide/execution/` and `/ko/guide/execution/`: deferred graph, lowering boundary, backend
+  paths, and the distinction between Frame submission and fusion.
+- `/guide/training/` and `/ko/guide/training/`: Module, autograd, optimizer, resource lifetime,
+  and verified GPU-resident behavior.
+- `/api/` and `/ko/api/`: practical index of the current Device, Tensor, Module, and optimizer
+  API; link source for the complete and versioned signatures.
+- `/playground/` and `/ko/playground/`: editable 2×2 matrices, selectable Tensor operations and
+  backend, actual TypeNN execution, result, backend, errors, and equivalent highlighted code.
+- `/examples/` and `/ko/examples/`: MNIST MLP code, source repository, correctness tests, and
+  implementation status.
+
+Every English route has a separately authored Korean counterpart with canonical and alternate
+language links. Shared top navigation provides a short product-level route; a documentation
+sidebar and previous/next links support deeper reading. Mobile turns the sidebar into a
+horizontal navigation row.
 
 ## Visual system
 
-- Use the Ant Design v5 palette from TypeShade: primary `#1677ff`, page ground `#f5f5f5`,
-  white containers, neutral text, and hairline borders.
-- Use IBM Plex Sans for interface copy, IBM Plex Sans KR for Korean, and IBM Plex Mono for
-  code and identifiers. Fonts are served locally.
-- Use 6px control corners and 8px card and code-frame corners.
-- Keep surfaces flat at rest. Use the primary blue for links, focus, and the main action.
-- Support light and dark themes. Default to the system preference and provide a remembered
-  theme control.
-- Respect reduced-motion preferences. Keep focus rings visible and controls keyboard usable.
+- Use TypeShade's restrained Ant Design palette: primary `#1677ff`, neutral ground, white
+  content panels, neutral ink, and hairline borders.
+- Use IBM Plex Sans for interface text, IBM Plex Sans KR for Korean glyph coverage, and IBM Plex
+  Mono for code and identifiers.
+- Use 6px control corners and 8px code/workbench corners. Panels stay flat; reserve shadow for
+  the main code sample and avoid decorative gradients.
+- The overview begins with working TypeNN code and the actual result shape. The rest of the page
+  leads from the execution path into guides and examples; do not rebuild the site as a hero plus
+  generic feature-card grid.
+- Reading pages use a stable docs shell: global header, left navigation, readable article measure,
+  examples in dark highlighted code frames, and related-page navigation.
+- The Playground uses standard form controls and explicit loading, empty, success, and error
+  states. It is a small functional demonstration, not a benchmark.
+- Keep light/dark theme selection remembered in local storage. Keep keyboard focus visible,
+  controls named, text contrast accessible, and content usable with reduced motion.
+- No stock images are required: verified code, source links, and real output are the visual proof.
 
-## Page structure
+## Content and accessibility
 
-- The header identifies TypeNN and links to the execution model, compiler path, project status,
-  GitHub, language route, and theme control.
-- The first screen shows the TypeNN README operation and its actual TypeShade kernel together.
-- The code control also exposes the documented MNIST training loop.
-- Follow with the deferred Tensor graph, GPU-resident optimizer behavior, the
-  TypeNN-to-TypeShade responsibility boundary, and current implementation limits.
-- Use links to source files and TODO entries as evidence. Do not simulate compiler output,
-  benchmark results, or GPU execution.
-- Use no stock images or decorative graphics. Code and the documented execution path carry the
-  product story.
-- Keep the content in a centered 1320px shell with 16px mobile and 24px wider gutters. Split
-  the hero at 64rem and stack it below that width.
-
-## Accessibility
-
-- Keep one `h1`, ordered section headings, landmarks, and a keyboard-visible skip link.
-- Give language and theme controls accessible names and visible focus states.
-- Keep code examples readable on narrow screens with horizontal scrolling.
-- Keep status understandable without color alone.
+- Write in plain sentences for TypeScript developers. English is the source route; Korean is
+  separately written, uses 합쇼체, and does not translate API identifiers.
+- Explain the observable behavior before implementation detail. Link claims to code or project
+  documentation.
+- The Playground accepts only numeric matrix values and fixed operations. It does not evaluate
+  user-provided source text.
+- Mark software-rendered validation as such. Do not call it a hardware GPU benchmark.
+- Keep one `h1`, ordered sections, landmarks, a keyboard-visible skip link, accessible names,
+  visible focus, and horizontal scrolling only for code or genuinely wide tables.

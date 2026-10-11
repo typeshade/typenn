@@ -1,0 +1,20 @@
+---
+import SiteLayout from "../../../layouts/SiteLayout.astro";
+import CodeBlock from "../../../components/CodeBlock.astro";
+const code = `const device = await nn.device({ device: "auto" });
+const x = device.tensor([1, 2, 3, 4], { shape: [2, 2] });
+const y = x.relu().softmax();
+const values = await y.data();
+
+await y.disposeGraph();
+await device.dispose();`;
+---
+<SiteLayout locale="ko" active="api" title="TypeNN API 참조" description="TypeNN Device, Tensor, Module, Optimizer 및 자동 미분 API를 확인합니다.">
+  <article class="docs-article">
+    <nav class="breadcrumbs" aria-label="Breadcrumb"><a href="/ko/">TypeNN</a><span>/</span><span>API 참조</span></nav>
+    <header class="page-heading"><p class="eyebrow">참조</p><h1>API 참조</h1><p class="lead">현재 예제에서 사용하는 공개 API를 정리했습니다. 정확한 overload와 옵션은 소스 선언을 확인하세요.</p></header>
+    <section class="doc-section"><h2>Device와 Tensor 수명주기</h2><CodeBlock title="생성, 실행, 해제" file="device.ts" code={code} /><ul class="api-list"><li><code>device(options?)</code><span>auto, cpu, webgpu, webgl2 중 선택하여 Device를 엽니다.</span></li><li><code>Device.tensor(values, &#123; shape &#125;)</code><span>Shape를 검사한 입력 Tensor를 생성합니다.</span></li><li><code>Tensor.data()</code><span>요청 그래프를 실행하고 호스트 값으로 반환합니다.</span></li><li><code>Tensor.disposeGraph(preserve?)</code><span>지정한 Tensor를 보존하면서 그래프 값을 해제합니다.</span></li><li><code>Device.dispose()</code><span>대기 중 작업을 기다린 뒤 런타임 자원을 정리합니다.</span></li></ul></section>
+    <section class="doc-section"><h2>Tensor 연산</h2><div class="api-columns"><div><h3>선형 대수</h3><p><code>matmul(other, options?)</code><br />전치 옵션이 있는 rank-2 행렬 곱입니다.</p></div><div><h3>Elementwise</h3><p><code>add</code>, <code>sub</code>, <code>mul</code>, <code>div</code>, <code>maximum</code>, <code>minimum</code>, <code>pow</code>와 지원 activation입니다.</p></div><div><h3>Reduction과 정규화</h3><p><code>sum</code>, <code>mean</code>, <code>max</code>, <code>min</code>, <code>argMax</code>, <code>softmax</code>, <code>logSoftmax</code>.</p></div><div><h3>Loss와 기울기</h3><p><code>softmaxCrossEntropyWithLogits</code>, <code>backward()</code>와 일부 Tensor 그래프 미분 규칙입니다.</p></div></div></section>
+    <section class="doc-section"><h2>Module과 Optimizer</h2><ul class="api-list"><li><code>Module</code><span>하위 계층을 등록하고 파라미터를 조회하며 train/eval 모드를 설정합니다.</span></li><li><code>Sequential</code>, <code>Linear</code>, <code>Flatten</code>, <code>ReLU</code>, <code>Dropout</code><span>현재 예제에서 사용하는 기본 계층입니다.</span></li><li><code>optim.SGD</code>, <code>optim.Adam</code><span>Device 계층에 따라 CPU 배열 또는 GPU 커널로 파라미터를 갱신합니다.</span></li><li><code>CrossEntropyLoss</code><span>MNIST 경로에서 logits와 정수 클래스 레이블을 받습니다.</span></li></ul><p class="fine-print">TypeShade의 순수 함수 <code>shadeGrad</code>와 TypeNN Tensor 그래프 자동 미분은 서로 다른 기능입니다.</p><p><a class="text-link" href="https://github.com/typeshade/typenn/tree/main/src">소스 선언 살펴보기 ↗</a></p></section>
+  </article>
+</SiteLayout>

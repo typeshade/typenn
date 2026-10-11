@@ -1,0 +1,111 @@
+---
+import ThemeControl from "../components/ThemeControl";
+import "../styles/global.css";
+
+type Locale = "en" | "ko";
+type PageKey = "home" | "start" | "guide" | "execution" | "training" | "api" | "playground" | "examples";
+
+interface Props {
+  locale: Locale;
+  active: PageKey;
+  title: string;
+  description: string;
+}
+
+const { locale, active, title, description } = Astro.props;
+const ko = locale === "ko";
+const links: { key: PageKey; en: string; ko: string; enHref: string; koHref: string }[] = [
+  { key: "home", en: "Overview", ko: "TypeNN 소개", enHref: "/", koHref: "/ko/" },
+  { key: "start", en: "Get started", ko: "시작하기", enHref: "/guide/", koHref: "/ko/guide/" },
+  { key: "execution", en: "Execution model", ko: "실행 모델", enHref: "/guide/execution/", koHref: "/ko/guide/execution/" },
+  { key: "training", en: "Training", ko: "모델 학습", enHref: "/guide/training/", koHref: "/ko/guide/training/" },
+  { key: "api", en: "API reference", ko: "API 참조", enHref: "/api/", koHref: "/ko/api/" },
+  { key: "playground", en: "Playground", ko: "직접 실행", enHref: "/playground/", koHref: "/ko/playground/" },
+  { key: "examples", en: "Examples", ko: "예제", enHref: "/examples/", koHref: "/ko/examples/" },
+];
+const canonicalUrl = `https://typenn.typeshade.dev${Astro.url.pathname}`;
+const alternatePath = ko ? Astro.url.pathname.replace(/^\/ko(?=\/|$)/, "") || "/" : `/ko${Astro.url.pathname === "/" ? "/" : Astro.url.pathname}`;
+const alternateLabel = ko ? "English" : "한국어";
+const sidebarGroups = ko
+  ? [
+      { title: "시작", keys: ["start"] as PageKey[] },
+      { title: "가이드", keys: ["execution", "training"] as PageKey[] },
+      { title: "참조와 실습", keys: ["api", "playground", "examples"] as PageKey[] },
+    ]
+  : [
+      { title: "Start here", keys: ["start"] as PageKey[] },
+      { title: "Guides", keys: ["execution", "training"] as PageKey[] },
+      { title: "Reference & practice", keys: ["api", "playground", "examples"] as PageKey[] },
+    ];
+---
+
+<!doctype html>
+<html lang={locale}>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content={description} />
+    <meta name="theme-color" content="#f5f5f5" />
+    <link rel="canonical" href={canonicalUrl} />
+    <link rel="alternate" hreflang="en" href={`https://typenn.typeshade.dev${ko ? alternatePath : Astro.url.pathname}`} />
+    <link rel="alternate" hreflang="ko" href={`https://typenn.typeshade.dev${ko ? Astro.url.pathname : alternatePath}`} />
+    <link rel="alternate" hreflang="x-default" href={`https://typenn.typeshade.dev${ko ? alternatePath : Astro.url.pathname}`} />
+    <title>{title}</title>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">{ko ? "본문으로 건너뛰기" : "Skip to content"}</a>
+    <header class="site-header">
+      <div class="header-inner">
+        <a class="brand" href={ko ? "/ko/" : "/"} aria-label="TypeNN home">
+          <span class="brand-mark" aria-hidden="true">N</span>
+          <span>TypeNN</span>
+        </a>
+        <nav class="top-nav" aria-label={ko ? "주 메뉴" : "Primary navigation"}>
+          {links.filter((item) => ["start", "api", "playground", "examples"].includes(item.key)).map((item) => (
+            <a class:list={["top-link", active === item.key && "is-active", item.key === "playground" && "nav-cta"]}
+              href={ko ? item.koHref : item.enHref} aria-current={active === item.key ? "page" : undefined}>
+              {ko ? item.ko : item.en}
+            </a>
+          ))}
+        </nav>
+        <div class="header-tools">
+          <a class="language-link" href={alternatePath}>{alternateLabel}</a>
+          <ThemeControl client:load darkLabel={ko ? "어두운 테마" : "Dark theme"} lightLabel={ko ? "밝은 테마" : "Light theme"} />
+        </div>
+      </div>
+    </header>
+
+    <div class:list={["page-frame", active === "home" && "home-frame", active === "playground" && "playground-frame"]}>
+      {active !== "home" && (
+        <aside class="docs-sidebar" aria-label={ko ? "문서 탐색" : "Documentation navigation"}>
+          <a class="sidebar-home" href={ko ? "/ko/" : "/"}>{ko ? "TypeNN 문서" : "TypeNN docs"}</a>
+          {sidebarGroups.map((group) => (
+            <div class="sidebar-group">
+              <p class="sidebar-heading">{group.title}</p>
+              {group.keys.map((key) => {
+                const item = links.find((link) => link.key === key);
+                return item && <a class:list={["sidebar-link", active === key && "is-active"]}
+                  href={ko ? item.koHref : item.enHref} aria-current={active === key ? "page" : undefined}>{ko ? item.ko : item.en}</a>;
+              })}
+            </div>
+          ))}
+          <a class="sidebar-source" href="https://github.com/typeshade/typenn">{ko ? "소스 코드 ↗" : "Source code ↗"}</a>
+        </aside>
+      )}
+      <main id="main" class="site-main">
+        <slot />
+      </main>
+    </div>
+    <footer class="site-footer">
+      <div class="footer-inner">
+        <span>{ko ? "TypeNN은 TypeScript로 Tensor 그래프를 정의하고 TypeShade는 커널을 컴파일하고 실행합니다." : "TypeNN defines Tensor graphs in TypeScript. TypeShade compiles and runs the kernels."}</span>
+        <div>
+          <a href="https://github.com/typeshade/typenn">{ko ? "TypeNN 저장소" : "TypeNN repository"}</a>
+          <a href="https://github.com/typeshade/typenn/tree/site/website-source/website">{ko ? "사이트 소스" : "Website source"}</a>
+          <a href="https://typeshade.dev">TypeShade</a>
+          <a href="https://github.com/typeshade/typenn/blob/main/TODO.md">TODO</a>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>
