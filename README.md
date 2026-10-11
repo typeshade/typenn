@@ -184,3 +184,8 @@ publishing it publicly with provenance.
 ## License
 
 Apache-2.0. See [LICENSE](./LICENSE).
+
+For a small Chromium WebGPU/WebGL2 runtime check (including software-rendered SwiftShader),
+build the package, serve the repository root, and open `tests/browser-gpu.html`. The page
+checks Adam/SGD updates and a 784→128→10 MLP smoke run; see `TODO.md` for the invocation and
+measured software-rendering results. SwiftShader timings are not physical GPU benchmarks.

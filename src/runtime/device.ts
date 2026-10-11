@@ -74,7 +74,8 @@ export class Device {
     const { runtime, fallbackReason } = await selectRuntime(preference);
 
     if (runtime) {
-      configure({ runtime });
+      if (runtime.tier === "webgpu") configure({ runtime });
+      else configure({ prefer: [runtime.tier], runtime: null });
       try {
         const pipelines = await preparePipelines(runtime);
         const device = new Device(

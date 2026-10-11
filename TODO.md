@@ -351,9 +351,17 @@ replace numerical runtime tests.
   in-place parameter updates through one TypeShade Frame on GPU devices. Adam first and
   second moments are Device-owned Resident buffers; optimizers do not call `grad.data()`
   on the GPU path. The CPU optimizer path remains the fallback for CPU devices.
-- GPU optimizer numerical execution has not been verified in this workspace: no `/dev/dri`
-  device or `nvidia-smi` is available. The WebGPU/WebGL2 kernels compile as part of the
-  production build, but backend runtime results require GPU CI or a supported browser.
+- GPU execution was verified with Chromium 154 and SwiftShader software rendering (forced
+  with `/usr/lib/chromium/vk_swiftshader_icd.json`; this is not a physical-GPU benchmark).
+  The browser smoke page checks WebGPU Adam/SGD, WebGL2 Adam, and a 784→128→10 MLP over
+  two steps. First-step and next-step values matched the expected CPU values within 2e-5;
+  MLP loss moved from 2.302433 to 2.210437. Device initialization measured about 0.9–1.1 s
+  for software WebGPU and 13.5 ms for WebGL2; tiny optimizer steps measured 7–13 ms on
+  WebGPU and about 523 ms on WebGL2. These timings include software-rendering and compile
+  effects and are smoke measurements, not comparable hardware performance results.
+- WebGL2 validation exposed a TypeNN setup bug: it passed the WebGL2 Runtime to TypeShade's
+  `configure({ runtime })`, which accepts only WebGPU runtimes. Device setup now configures
+  the WebGL2 tier without assigning that Runtime to the WebGPU call layer.
 - TypeNN's normal operation executor still submits one dispatch per graph node. This work
   does not implement graph fusion or liveness-based buffer reuse.
 - `matmul.shade.ts` remains the per-output, serial-inner-loop kernel. Tiling is deferred
@@ -361,3 +369,21 @@ replace numerical runtime tests.
 - CPU numerical smoke coverage and a Tensor-graph finite-difference gradient check run with
   `npm test`; GPU dispatch counts, transfer bytes, buffer counts, MNIST metrics, and TFJS
   comparisons remain unmeasured.
+
+### Browser software-rendering smoke test
+
+Build TypeNN, serve the repository root, and open `tests/browser-gpu.html` in Chromium with
+SwiftShader WebGPU/WebGL2 enabled. The page prints backend-specific results and timings.
+One reproducing setup on Linux is:
+
+```sh
+npm run build
+python3 -m http.server 8765
+VK_ICD_FILENAMES=/usr/lib/chromium/vk_swiftshader_icd.json chromium \
+  --headless --enable-unsafe-webgpu --use-vulkan \
+  --enable-features=Vulkan,WebGPUDeveloperFeatures \
+  --use-gl=angle --use-angle=swiftshader --enable-webgl \
+  --ignore-gpu-blocklist http://127.0.0.1:8765/tests/browser-gpu.html
+```
+
+The JSON result is rendered in the page. Paths and available flags vary by Chromium package.

@@ -1,0 +1,86 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>TypeNN browser GPU smoke</title>
+<pre id="results">running</pre>
+<script type="module">
+import * as nn from "../dist/index.js";
+
+const results = [];
+const checkClose = (actual, expected, tolerance, label) => {
+  if (actual.length !== expected.length) throw new Error(`${label}: length mismatch`);
+  for (let index = 0; index < actual.length; index++) {
+    const absolute = Math.abs(actual[index] - expected[index]);
+    const relative = absolute / Math.max(Math.abs(expected[index]), 1e-8);
+    if (absolute > tolerance && relative > tolerance)
+      throw new Error(`${label}[${index}]: ${actual[index]} != ${expected[index]}`);
+  }
+};
+
+async function optimizerSmoke(backend, optimizerKind) {
+  const started = performance.now();
+  const device = await nn.device({ device: backend });
+  const initializationMs = performance.now() - started;
+  try {
+    const parameter = device.createParameter(new Float32Array([1, -2]), { shape: [2] });
+    const objective = parameter.square().sum();
+    await objective.backward();
+    const optimizer = optimizerKind === "adam"
+      ? new nn.Adam([parameter], { lr: 0.1 })
+      : new nn.SGD([parameter], { lr: 0.05 });
+    const stepStarted = performance.now();
+    await optimizer.step();
+    const stepMs = performance.now() - stepStarted;
+    const actual = Array.from(await parameter.data());
+    const expected = optimizerKind === "adam" ? [0.9, -1.9] : [0.9, -1.8];
+    checkClose(actual, expected, 2e-5, `${backend} ${optimizerKind}`);
+    await objective.disposeGraph([parameter, parameter.grad]);
+    results.push({ backend, optimizer: optimizerKind, initializationMs, stepMs, actual });
+  } finally {
+    await device.dispose();
+  }
+}
+
+async function mlpSmoke() {
+  const device = await nn.device({ device: "webgpu" });
+  const model = new nn.Sequential(
+    new nn.Linear(784, 128, { seed: 17 }),
+    new nn.ReLU(),
+    new nn.Linear(128, 10, { seed: 19 }),
+  ).to(device);
+  const parameters = model.parameters();
+  const optimizer = new nn.Adam(parameters, { lr: 0.001 });
+  const criterion = new nn.CrossEntropyLoss();
+  const sample = Float32Array.from({ length: 784 }, (_, index) => ((index * 17) % 251) / 251);
+  const losses = [];
+  try {
+    for (let iteration = 0; iteration < 2; iteration++) {
+      const input = device.tensor(sample, { shape: [1, 784] });
+      const logits = model.forward(input);
+      const loss = criterion.forward(logits, [3]);
+      losses.push((await loss.data())[0]);
+      await loss.backward();
+      await optimizer.step();
+      await optimizer.zeroGrad();
+      await loss.disposeGraph(parameters);
+    }
+    if (!(losses[1] < losses[0])) throw new Error(`MLP loss did not fall: ${losses}`);
+    results.push({ backend: "webgpu", model: "784-128-10", batchSize: 1, parameterCount: 101770, losses });
+  } finally {
+    await device.dispose();
+  }
+}
+
+try {
+  await optimizerSmoke("webgpu", "adam");
+  await optimizerSmoke("webgpu", "sgd");
+  if (document.createElement("canvas").getContext("webgl2"))
+    await optimizerSmoke("webgl2", "adam");
+  else
+    results.push({ backend: "webgl2", skipped: "WebGL2 context unavailable" });
+  await mlpSmoke();
+  document.querySelector("#results").textContent = JSON.stringify({ status: "passed", results }, null, 2);
+} catch (error) {
+  document.querySelector("#results").textContent = JSON.stringify({ status: "failed", error: String(error), results }, null, 2);
+  throw error;
+}
+</script>
