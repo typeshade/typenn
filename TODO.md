@@ -344,3 +344,20 @@ replace numerical runtime tests.
 - Softmax and cross-entropy kernels reduce each row or axis slice within one invocation.
   Long axes may need a parallel reduction path.
 - [ ] Add numerical CPU/WebGPU parity coverage and benchmark representative shapes.
+
+## Compiler-first execution and training status (2026-10-11)
+
+- General `Module → backward() → Adam/SGD.step()` now schedules deferred gradients and
+  in-place parameter updates through one TypeShade Frame on GPU devices. Adam first and
+  second moments are Device-owned Resident buffers; optimizers do not call `grad.data()`
+  on the GPU path. The CPU optimizer path remains the fallback for CPU devices.
+- GPU optimizer numerical execution has not been verified in this workspace: no `/dev/dri`
+  device or `nvidia-smi` is available. The WebGPU/WebGL2 kernels compile as part of the
+  production build, but backend runtime results require GPU CI or a supported browser.
+- TypeNN's normal operation executor still submits one dispatch per graph node. This work
+  does not implement graph fusion or liveness-based buffer reuse.
+- `matmul.shade.ts` remains the per-output, serial-inner-loop kernel. Tiling is deferred
+  until CPU/GPU parity and representative GPU benchmarks can be run.
+- CPU numerical smoke coverage and a Tensor-graph finite-difference gradient check run with
+  `npm test`; GPU dispatch counts, transfer bytes, buffer counts, MNIST metrics, and TFJS
+  comparisons remain unmeasured.

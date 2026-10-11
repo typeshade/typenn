@@ -259,7 +259,10 @@ export class Tensor {
 
   async data(): Promise<Float32Array> {
     this.assertUsable();
-    return this.device.materialize(this);
+    const values = await this.device.materialize(this);
+    if (this.requiresGrad && this.node.kind === "input")
+      this.node.value.set(values);
+    return values;
   }
 
   async backward(upstream?: Tensor): Promise<void> {

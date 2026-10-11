@@ -51,6 +51,8 @@ import linearObjectivePack from "../kernels/linear-objective.shade.ts";
 import linearReducePack from "../kernels/linear-reduce.shade.ts";
 import linearBackwardPack from "../kernels/linear-backward.shade.ts";
 import linearUpdatePack from "../kernels/linear-update.shade.ts";
+import adamUpdatePack from "../kernels/adam-update.shade.ts";
+import sgdUpdatePack from "../kernels/sgd-update.shade.ts";
 import matmulPack from "../kernels/matmul.shade.ts";
 import conv2dPack from "../kernels/conv2d.shade.ts";
 import maxPoolPack from "../kernels/max-pool.shade.ts";
@@ -139,6 +141,8 @@ export type Operation =
   | "softmax"
   | "logSoftmax"
   | "softmaxCrossEntropyWithLogits"
+  | "adamUpdate"
+  | "sgdUpdate"
   | LinearTrainingEntry;
 
 export const PACKS: Record<Operation, Pack> = {
@@ -195,6 +199,8 @@ export const PACKS: Record<Operation, Pack> = {
   linearReduce: linearReducePack,
   linearBackward: linearBackwardPack,
   linearUpdate: linearUpdatePack,
+  adamUpdate: adamUpdatePack,
+  sgdUpdate: sgdUpdatePack,
   matmul: matmulPack,
   conv2d: conv2dPack,
   maxPool: maxPoolPack,
@@ -272,6 +278,8 @@ export const ENTRYPOINT: Record<Operation, string> = {
   linearReduce: "linearReduceKernel",
   linearBackward: "linearBackwardKernel",
   linearUpdate: "linearUpdateKernel",
+  adamUpdate: "adamUpdateKernel",
+  sgdUpdate: "sgdUpdateKernel",
   matmul: "matmulKernel",
   conv2d: "conv2dKernel",
   maxPool: "maxPoolKernel",

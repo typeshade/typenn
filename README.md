@@ -151,8 +151,11 @@ unsupported.
   `disposeGraph()` to release an operation graph while preserving parameters.
 - `Module.to()`, `parameters()`, `train()`, and `eval()` support user-defined models and
   registered child layers. `Flatten`, `Linear`/`Dense`, `ReLU`, and `Dropout` cover the example.
-- `Tensor.backward()` accumulates gradients on registered parameter leaves. SGD and Adam
-  optimizer objects update host parameter arrays; Adam is not yet a device kernel.
+- `Tensor.backward()` accumulates gradients on registered parameter leaves. The CPU
+  optimizer path updates host arrays; WebGPU/WebGL2 SGD and Adam dispatch parameter updates
+  in the same TypeShade Frame as deferred gradient computation. Adam moments stay resident
+  until the Device is disposed. Calling `Tensor.data()` explicitly reads values back and
+  refreshes a trainable leaf's host mirror.
 - Tensor-graph autograd remains limited; model serialization and WebNN are not implemented.
   The standalone softmax-cross-entropy operation returns one loss per row; the Trainer's
   explicit backward kernel computes its gradient separately.

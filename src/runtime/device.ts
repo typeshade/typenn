@@ -39,6 +39,7 @@ export class Device {
     Promise<Float32Array>
   >();
   private readonly pendingExecutions = new Set<Promise<Float32Array>>();
+  private readonly pendingGpuOperations = new Set<Promise<void>>();
   private runtime?: Runtime;
   private disposed = false;
   private disposing = false;
@@ -139,6 +140,14 @@ export class Device {
     return this.buffers.allocate(initial, true);
   }
 
+  /** @internal Allocate a GPU-resident optimizer state buffer. */
+  createResidentKernelBuffer(initial: Float32Array): Resident<Float32Array> {
+    this.assertUsable();
+    if (!this.runtime)
+      throw new Error("GPU resident buffers require a GPU Device.");
+    return this.buffers.allocate(initial, true);
+  }
+
   /** @internal Replace a reusable CPU or resident input buffer. */
   writeKernelBuffer<T extends Float32Array | Uint32Array>(
     target: T | Resident<T>,
@@ -161,6 +170,40 @@ export class Device {
     target: T | Resident<T>,
   ): void {
     this.buffers.release(target);
+  }
+
+  /** @internal Run parameter updates without reading gradients or parameters back to the host. */
+  async runOptimizerUpdates(
+    kind: "adam" | "sgd",
+    updates: readonly {
+      readonly parameter: Tensor;
+      readonly gradient: Tensor;
+      readonly firstMoment?: Resident<Float32Array>;
+      readonly secondMoment?: Resident<Float32Array>;
+    }[],
+    options: {
+      readonly learningRate: number;
+      readonly beta1?: number;
+      readonly beta2?: number;
+      readonly epsilon?: number;
+      readonly firstCorrection?: number;
+      readonly secondCorrection?: number;
+    },
+  ): Promise<boolean> {
+    this.assertUsable();
+    if (!this.gpuExecutor) return false;
+    const operation = this.gpuExecutor.runOptimizerUpdates(
+      kind,
+      updates,
+      options,
+    );
+    this.pendingGpuOperations.add(operation);
+    try {
+      await operation;
+    } finally {
+      this.pendingGpuOperations.delete(operation);
+    }
+    return true;
   }
 
   /** @internal Run ordered training entries in one TypeShade frame, or on its CPU tier. */
@@ -217,7 +260,10 @@ export class Device {
   async dispose(): Promise<void> {
     if (this.disposed || this.disposing) return;
     this.disposing = true;
-    await Promise.allSettled([...this.pendingExecutions]);
+    await Promise.allSettled([
+      ...this.pendingExecutions,
+      ...this.pendingGpuOperations,
+    ]);
     this.disposed = true;
     this.buffers.dispose();
     this.runtime?.destroy();

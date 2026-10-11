@@ -17,6 +17,17 @@ export class SGD extends Optimizer {
   }
 
   async step(): Promise<void> {
+    const gradients = this.parameters.map((parameter) => {
+      if (!parameter.grad)
+        throw new Error("Call backward() before optimizer.step().");
+      return { parameter, gradient: parameter.grad };
+    });
+    if (
+      await this.parameters[0]!.device.runOptimizerUpdates("sgd", gradients, {
+        learningRate: this.learningRate,
+      })
+    )
+      return;
     const updates = [];
     for (const parameter of this.parameters) {
       updates.push({

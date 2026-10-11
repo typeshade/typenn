@@ -1,3 +1,4 @@
+import type { Resident } from "typeshade/runtime";
 import type { Tensor } from "../../tensor/tensor.js";
 import { Optimizer } from "./optimizer.js";
 
@@ -11,6 +12,8 @@ export interface AdamOptions {
 interface Moments {
   readonly first: Float32Array;
   readonly second: Float32Array;
+  readonly firstResident?: Resident<Float32Array>;
+  readonly secondResident?: Resident<Float32Array>;
 }
 
 export class Adam extends Optimizer {
@@ -41,9 +44,53 @@ export class Adam extends Optimizer {
   async step(): Promise<void> {
     if (this.parameters.some((parameter) => !parameter.grad))
       throw new Error("Call backward() before optimizer.step().");
+    const device = this.parameters[0]!.device;
     this.iteration++;
     const firstCorrection = 1 - this.beta1 ** this.iteration;
     const secondCorrection = 1 - this.beta2 ** this.iteration;
+    if (device.backend.name !== "cpu") {
+      const updates = this.parameters.map((parameter) => {
+        if (!parameter.grad)
+          throw new Error("Call backward() before optimizer.step().");
+        let moment = this.moments.get(parameter);
+        if (!moment) {
+          const size = parameter.shape.reduce(
+            (count, dimension) => count * dimension,
+            1,
+          );
+          moment = {
+            first: new Float32Array(size),
+            second: new Float32Array(size),
+            firstResident: device.createResidentKernelBuffer(
+              new Float32Array(size),
+            ),
+            secondResident: device.createResidentKernelBuffer(
+              new Float32Array(size),
+            ),
+          };
+          this.moments.set(parameter, moment);
+        }
+        const firstMoment = moment.firstResident;
+        const secondMoment = moment.secondResident;
+        if (!firstMoment || !secondMoment)
+          throw new Error("Adam GPU moment buffers were not initialized.");
+        return {
+          parameter,
+          gradient: parameter.grad,
+          firstMoment,
+          secondMoment,
+        };
+      });
+      await device.runOptimizerUpdates("adam", updates, {
+        learningRate: this.learningRate,
+        beta1: this.beta1,
+        beta2: this.beta2,
+        epsilon: this.epsilon,
+        firstCorrection,
+        secondCorrection,
+      });
+      return;
+    }
     const updates = [];
     for (const parameter of this.parameters) {
       updates.push({
