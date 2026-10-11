@@ -26,6 +26,7 @@ const NODE_PARENTS: ParentSelectorMap = {
   softmaxCrossEntropyGrad: ({ logits, labels, dy }) => [logits, labels, dy],
   reduce: ({ input }) => [input],
   softmaxCrossEntropy: ({ logits, labels }) => [logits, labels],
+  reshape: ({ input }) => [input],
 };
 
 function parents(node: TensorNode): readonly Tensor[] {

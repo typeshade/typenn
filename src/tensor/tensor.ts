@@ -1,5 +1,7 @@
 import type { Device } from "../runtime/device.js";
 import type { Shape } from "./shape.js";
+import { topologicalOrder } from "../autograd/graph.js";
+import { backward } from "../autograd.js";
 import type { TensorNode } from "./node.js";
 import {
   binary,
@@ -21,9 +23,9 @@ import { softmaxCrossEntropyWithLogits } from "./operations/loss.js";
 import { softmax } from "./operations/normalization.js";
 import { reduce } from "./operations/reductions.js";
 import { pool2d, pool2dGrad } from "./operations/spatial.js";
+import { reshape } from "./operations/shape.js";
 import type { Conv2DOptions, Pool2DOptions } from "./spatial.js";
 
-export type { TensorNode } from "./node.js";
 export type { Conv2DOptions, Pool2DOptions } from "./spatial.js";
 
 interface ResidentValue {
@@ -42,12 +44,19 @@ export class Tensor {
     readonly device: Device,
     readonly shape: Shape,
     /** @internal */ readonly node: TensorNode,
+    readonly requiresGrad = false,
   ) {
     if (node.kind === "input") this.materialized = node.value;
   }
 
+  grad?: Tensor;
+
   relu(): Tensor {
     return relu(this);
+  }
+
+  reshape(shape: Shape): Tensor {
+    return reshape(this, shape);
   }
 
   reluGrad(outputGradient: Tensor): Tensor {
@@ -77,6 +86,27 @@ export class Tensor {
   }
   tanh(): Tensor {
     return unary(this, "tanh");
+  }
+  acos(): Tensor {
+    return unary(this, "acos");
+  }
+  acosh(): Tensor {
+    return unary(this, "acosh");
+  }
+  asin(): Tensor {
+    return unary(this, "asin");
+  }
+  asinh(): Tensor {
+    return unary(this, "asinh");
+  }
+  atan(): Tensor {
+    return unary(this, "atan");
+  }
+  atanh(): Tensor {
+    return unary(this, "atanh");
+  }
+  step(): Tensor {
+    return unary(this, "step");
   }
   floor(): Tensor {
     return unary(this, "floor");
@@ -232,6 +262,44 @@ export class Tensor {
     return this.device.materialize(this);
   }
 
+  async backward(upstream?: Tensor): Promise<void> {
+    await backward(this, upstream);
+  }
+
+  async disposeGraph(preserve: readonly Tensor[] = []): Promise<void> {
+    const retained = new Set(preserve);
+    await Promise.all(
+      topologicalOrder(this)
+        .filter((tensor) => !retained.has(tensor))
+        .map((tensor) => tensor.dispose()),
+    );
+  }
+
+  async zeroGrad(): Promise<void> {
+    await this.grad?.dispose();
+    this.grad = undefined;
+  }
+
+  /** @internal Update a parameter leaf and invalidate its resident GPU value. */
+  async assign(values: ArrayLike<number>): Promise<void> {
+    this.assertUsable();
+    if (!this.requiresGrad || this.node.kind !== "input")
+      throw new TypeError(
+        "assign() is only available on trainable parameter tensors.",
+      );
+    if (values.length !== this.node.value.length)
+      throw new RangeError("Parameter assignment must preserve tensor size.");
+    this.node.value.set(values);
+    await this.device.invalidate(this);
+  }
+
+  /** @internal Host view used by the initial optimizer implementation. */
+  parameterValues(): Float32Array {
+    if (!this.requiresGrad || this.node.kind !== "input")
+      throw new TypeError("Expected a trainable parameter tensor.");
+    return this.node.value;
+  }
+
   async dispose(): Promise<void> {
     if (this.disposed) return;
     this.disposed = true;
@@ -239,7 +307,7 @@ export class Tensor {
   }
 
   /** @internal */
-  setMaterialized(value: TensorStorage): void {
+  setMaterialized(value: TensorStorage | undefined): void {
     this.materialized = value;
   }
 

@@ -36,7 +36,7 @@ and backend constraints.
 | P1       | `tf.tanh(x)`                                          | `nn.tanh(x)`                                       | Implemented                                                                             |
 | P1       | `tf.logSoftmax(x, axis)`                              | `nn.logSoftmax(x, axis)`                           | Implemented: arbitrary rank and axis; stable normalized slices                          |
 | P2       | `tf.transpose(x, perm)`                               | `nn.transpose(x, perm)`                            | TODO                                                                                    |
-| P2       | `tf.reshape(x, shape)`                                | `nn.reshape(x, shape)`                             | TODO                                                                                    |
+| P2       | `tf.reshape(x, shape)`                                | `nn.reshape(x, shape)`                             | Implemented: preserves element count; CPU/WebGPU and autograd                           |
 | P2       | `tf.concat(tensors, axis)`                            | `nn.concat(tensors, axis)`                         | TODO                                                                                    |
 | P2       | `tf.split(x, numOrSizeSplits, axis)`                  | `nn.split(x, numOrSizeSplits, axis)`               | TODO                                                                                    |
 | P2       | `tf.gather(x, indices, axis)`                         | `nn.gather(x, indices, axis)`                      | TODO                                                                                    |
@@ -74,13 +74,13 @@ unless already present in the table above.
 | P1       | `tf.prod(x, axis)`                                           | `nn.prod(x, axis)`                                           | Implemented                                                                                                  |
 | P1       | `tf.all(x, axis)`                                            | `nn.all(x, axis)`                                            | TODO                                                                                                         |
 | P1       | `tf.any(x, axis)`                                            | `nn.any(x, axis)`                                            | TODO                                                                                                         |
-| P2       | `tf.acos(x)`                                                 | `nn.acos(x)`                                                 | TODO                                                                                                         |
-| P2       | `tf.acosh(x)`                                                | `nn.acosh(x)`                                                | TODO                                                                                                         |
-| P2       | `tf.asin(x)`                                                 | `nn.asin(x)`                                                 | TODO                                                                                                         |
-| P2       | `tf.asinh(x)`                                                | `nn.asinh(x)`                                                | TODO                                                                                                         |
-| P2       | `tf.atan(x)`                                                 | `nn.atan(x)`                                                 | TODO                                                                                                         |
+| P2       | `tf.acos(x)`                                                 | `nn.acos(x)`                                                 | Implemented with TypeShade builtin; CPU/WebGPU; Tensor-graph gradient                                        |
+| P2       | `tf.acosh(x)`                                                | `nn.acosh(x)`                                                | Implemented with TypeShade builtin; CPU/WebGPU; Tensor-graph gradient                                        |
+| P2       | `tf.asin(x)`                                                 | `nn.asin(x)`                                                 | Implemented with TypeShade builtin; CPU/WebGPU; Tensor-graph gradient                                        |
+| P2       | `tf.asinh(x)`                                                | `nn.asinh(x)`                                                | Implemented with TypeShade builtin; CPU/WebGPU; Tensor-graph gradient                                        |
+| P2       | `tf.atan(x)`                                                 | `nn.atan(x)`                                                 | Implemented with TypeShade builtin; CPU/WebGPU; Tensor-graph gradient                                        |
 | P2       | `tf.atan2(a, b)`                                             | `nn.atan2(a, b)`                                             | TODO                                                                                                         |
-| P2       | `tf.atanh(x)`                                                | `nn.atanh(x)`                                                | TODO                                                                                                         |
+| P2       | `tf.atanh(x)`                                                | `nn.atanh(x)`                                                | Implemented with TypeShade builtin; CPU/WebGPU; Tensor-graph gradient                                        |
 | P2       | `tf.ceil(x)`                                                 | `nn.ceil(x)`                                                 | Implemented                                                                                                  |
 | P2       | `tf.cos(x)`                                                  | `nn.cos(x)`                                                  | Implemented                                                                                                  |
 | P2       | `tf.cosh(x)`                                                 | `nn.cosh(x)`                                                 | Implemented                                                                                                  |
@@ -99,7 +99,7 @@ unless already present in the table above.
 | P2       | `tf.sign(x)`                                                 | `nn.sign(x)`                                                 | Implemented                                                                                                  |
 | P2       | `tf.sin(x)`                                                  | `nn.sin(x)`                                                  | Implemented                                                                                                  |
 | P2       | `tf.sinh(x)`                                                 | `nn.sinh(x)`                                                 | Implemented                                                                                                  |
-| P2       | `tf.step(x)`                                                 | `nn.step(x)`                                                 | TODO                                                                                                         |
+| P2       | `tf.step(x)`                                                 | `nn.step(x)`                                                 | Implemented as 0 for negative inputs, 1 otherwise; zero Tensor-graph gradient                                |
 | P2       | `tf.tan(x)`                                                  | `nn.tan(x)`                                                  | Implemented with sin/cos                                                                                     |
 | P2       | `tf.expandDims(x, axis)`                                     | `nn.expandDims(x, axis)`                                     | TODO                                                                                                         |
 | P2       | `tf.reverse(x, axis)`                                        | `nn.reverse(x, axis)`                                        | TODO                                                                                                         |
@@ -218,7 +218,7 @@ needs a gradient rule and corresponding execution path before TypeNN can train a
 
 - [x] Implement explicit TypeShade forward, stable objective, backward, reduction, and SGD update kernels for one `Linear` classifier.
 - [x] Add `createTrainer()` with batched integer-label data and `onEpoch` metrics across TypeShade CPU/WebGPU/WebGL2 execution.
-- [ ] Generalize training to `Sequential` models with multiple trainable layers and activation backpropagation.
+- [ ] Generalize `createTrainer().fit()` to `Sequential` models. The explicit PyTorch-style loop now supports a user-defined `Module` with multiple `Linear` layers, ReLU, Dropout, `backward()`, and SGD/Adam.
 
 - [x] Re-export TypeShade `grad` and `gradCheck` as `shadeGrad`/`shadeGradCheck` for pure Shade functions and custom activations; this does not differentiate TypeNN Tensor graphs.
 - [ ] Expand TypeNN Tensor-graph gradient propagation beyond the initial supported reverse-mode subset; TypeShade `grad` operates on pure IR functions, not TypeNN Tensor nodes or storage bindings.
@@ -226,25 +226,29 @@ needs a gradient rule and corresponding execution path before TypeNN can train a
 - [x] Add softmax/log-softmax gradient kernels to Tensor-graph autograd.
 - [ ] Add `prod`/`max`/`min` reduction gradients and special activation gradient rules.
 - [x] Connect `nn.softmaxCrossEntropyWithLogits()` and `sum`/`mean` reductions to Tensor-graph autograd.
-- [ ] Generalize optimizers to graph parameters; add gradient accumulation and Adam.
+- [x] Add trainable graph parameters, accumulated `Tensor.backward()` gradients, `zeroGrad()`, and SGD/Adam optimizer objects. Adam moments and parameter updates currently run on host arrays.
 - [ ] Use TypeShade `gradCheck` against its f64 CPU oracle for generated Shade derivatives.
 
 ## API and kernel implementation notes
 
-- [x] Keep one TypeShade compute entrypoint per `src/kernels/<operation>.shade.ts` file, with filenames following the operation name (for example, `add.shade.ts` and `relu.shade.ts`). The current split has 65 files and the runtime registry imports each file separately.
+- [x] Keep one TypeShade compute entrypoint per `src/kernels/<operation>.shade.ts` file, with filenames following the operation name (for example, `add.shade.ts` and `relu.shade.ts`). The runtime registry imports every kernel source separately.
 - [x] Split TypeShade CPU graph evaluation into node-kind dispatch and elementwise, reduction, normalization, loss, spatial, and linear-algebra executor modules.
 - [x] Split TypeNN graph-node types into individual files under `src/tensor/nodes/` and keep `src/tensor/node.ts` as a compatibility re-export.
 - [x] Split Tensor graph builders into elementwise, linear-algebra, spatial, normalization, loss, and reduction modules.
+- [x] Split public operation wrappers by operation family; keep `src/nn/ops.ts` as a re-export barrel.
+- [x] Split each layer class into its own file; keep `src/nn/layers.ts` as a re-export barrel and `Sequential` in its own file.
+- [x] Add shape-checked `reshape()` with CPU/WebGPU execution and a matching autograd rule.
+- [x] Add `Flatten`, `Dropout`, `Dense`, `Module.to()/parameters()/train()/eval()`, sparse-label `CrossEntropyLoss`, `Tensor.backward()/zeroGrad()`, and explicit SGD/Adam updates for the MNIST model loop.
 - [x] Split GPU graph execution, resident buffer ownership, backend selection, pipeline preparation, and linear-training dispatch out of `src/runtime/device.ts`.
 - [x] Add `npm run lint` to check formatting across TypeScript, TypeShade, docs, and configuration files.
-- [ ] Export remaining listed operations as `nn.*` functions from `src/index.ts`; tensor instance methods may remain as conveniences.
+- [ ] Export remaining listed operations as `nn.*` functions from `src/index.ts`; tensor instance methods may remain as conveniences. Newly completed inverse-trigonometric functions, `step`, and `reshape` are exported.
 - [ ] Keep shape inference and validation in TypeNN's graph layer; keep device execution in TypeShade-backed kernels.
 - [ ] Support CPU and WebGPU paths for each operation before marking it implemented. Record rank, dtype, broadcasting, and axis limits when support is partial.
 - [ ] Add each operation to the graph node union, runtime dispatch, CPU reference path, and TypeShade program manifest as applicable.
 
 ## TypeShade kernel source review
 
-Re-reviewed all 65 source files individually on 2026-10-11, including `add.shade.ts`.
+Re-reviewed the existing 65 source files individually on 2026-10-11, including `add.shade.ts`. The new inverse-trigonometric, `step`, and `reshape` kernels were separately checked for operation semantics, bounds, entrypoint naming, CPU generation, and WebGPU compilation.
 The checklist records the single exported compute entrypoint in each file. Review scope
 was bounds checks, shape/index calculations, operation semantics, and naming. The audit found and fixed
 broadcast-gradient branching, temporary generated-style names, max-pool handling for
@@ -320,6 +324,14 @@ replace numerical runtime tests.
 | `sum.shade.ts`                               | `sumKernel`                           | Reviewed      |
 | `tan.shade.ts`                               | `tanKernel`                           | Reviewed      |
 | `tanh.shade.ts`                              | `tanhKernel`                          | Reviewed      |
+| `acos.shade.ts`                              | `acosKernel`                          | Reviewed      |
+| `acosh.shade.ts`                             | `acoshKernel`                         | Reviewed      |
+| `asin.shade.ts`                              | `asinKernel`                          | Reviewed      |
+| `asinh.shade.ts`                             | `asinhKernel`                         | Reviewed      |
+| `atan.shade.ts`                              | `atanKernel`                          | Reviewed      |
+| `atanh.shade.ts`                             | `atanhKernel`                         | Reviewed      |
+| `reshape.shade.ts`                           | `reshapeKernel`                       | Reviewed      |
+| `step.shade.ts`                              | `stepKernel`                          | Reviewed      |
 
 ### Findings and limits
 

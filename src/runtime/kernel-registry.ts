@@ -64,12 +64,28 @@ import crossEntropyLogitsGradPack from "../kernels/cross-entropy-logits-grad.sha
 import crossEntropyLabelsGradPack from "../kernels/cross-entropy-labels-grad.shade.ts";
 import softmaxPack from "../kernels/softmax.shade.ts";
 import logSoftmaxPack from "../kernels/log-softmax.shade.ts";
+import acosPack from "../kernels/acos.shade.ts";
+import acoshPack from "../kernels/acosh.shade.ts";
+import asinPack from "../kernels/asin.shade.ts";
+import asinhPack from "../kernels/asinh.shade.ts";
+import atanPack from "../kernels/atan.shade.ts";
+import atanhPack from "../kernels/atanh.shade.ts";
+import stepPack from "../kernels/step.shade.ts";
+import reshapePack from "../kernels/reshape.shade.ts";
 
 type BinaryOperation =
   "add" | "sub" | "mul" | "div" | "maximum" | "minimum" | "pow" | "prelu";
 type ReductionOperation =
   "sum" | "mean" | "prod" | "max" | "min" | "argMax" | "argMin";
 type UnaryOperation =
+  | "acos"
+  | "acosh"
+  | "asin"
+  | "asinh"
+  | "atan"
+  | "atanh"
+  | "step"
+  | "reshape"
   | "neg"
   | "abs"
   | "square"
@@ -192,6 +208,14 @@ export const PACKS: Record<Operation, Pack> = {
   crossEntropyLabelsGrad: crossEntropyLabelsGradPack,
   softmax: softmaxPack,
   logSoftmax: logSoftmaxPack,
+  acos: acosPack,
+  acosh: acoshPack,
+  asin: asinPack,
+  asinh: asinhPack,
+  atan: atanPack,
+  atanh: atanhPack,
+  step: stepPack,
+  reshape: reshapePack,
 };
 
 export const ENTRYPOINT: Record<Operation, string> = {
@@ -261,4 +285,12 @@ export const ENTRYPOINT: Record<Operation, string> = {
   crossEntropyLabelsGrad: "crossEntropyLabelsGradKernel",
   softmax: "softmaxKernel",
   logSoftmax: "logSoftmaxKernel",
+  acos: "acosKernel",
+  acosh: "acoshKernel",
+  asin: "asinKernel",
+  asinh: "asinhKernel",
+  atan: "atanKernel",
+  atanh: "atanhKernel",
+  step: "stepKernel",
+  reshape: "reshapeKernel",
 };

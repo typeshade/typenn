@@ -6,7 +6,8 @@ async function filesIn(directory) {
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     const path = `${directory}/${entry.name}`;
     if (entry.isDirectory()) files.push(...(await filesIn(path)));
-    else if (entry.isFile()) files.push(path);
+    else if (entry.isFile() && !entry.name.endsWith(".shade.typeshade.ts"))
+      files.push(path);
   }
   return files;
 }
@@ -19,6 +20,7 @@ function removeTypeShadeDecorators(source) {
 
 const sourceFiles = await filesIn("src");
 const scriptFiles = await filesIn("scripts");
+const exampleFiles = await filesIn("examples");
 const configFiles = [
   "README.md",
   "TODO.md",
@@ -27,7 +29,7 @@ const configFiles = [
   "tsconfig.json",
   "vite.config.ts",
 ];
-const files = [...sourceFiles, ...scriptFiles, ...configFiles];
+const files = [...sourceFiles, ...scriptFiles, ...exampleFiles, ...configFiles];
 const failures = [];
 
 for (const path of files) {

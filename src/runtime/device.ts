@@ -118,6 +118,18 @@ export class Device {
     return new Tensor(this, shape, { kind: "input", value: copy });
   }
 
+  /** @internal Create a trainable leaf backed by the module's parameter array. */
+  createParameter(
+    values: Float32Array,
+    options: { readonly shape: Shape },
+  ): Tensor {
+    this.assertUsable();
+    const shape = checkedShape(options.shape);
+    if (values.length !== sizeOf(shape))
+      throw new RangeError("Parameter data length does not match its shape.");
+    return new Tensor(this, shape, { kind: "input", value: values }, true);
+  }
+
   /** @internal Allocate a host buffer for CPU or a TypeShade resident for device execution. */
   createKernelBuffer<T extends Float32Array | Uint32Array>(
     initial: T,
@@ -194,6 +206,12 @@ export class Device {
     const value = tensor.getMaterialized();
     if (value && !(value instanceof Float32Array))
       this.buffers.release(value as Resident<Float32Array>);
+  }
+
+  /** @internal Drop a cached resident value after host-side parameter updates. */
+  async invalidate(tensor: Tensor): Promise<void> {
+    await this.release(tensor);
+    tensor.setMaterialized(undefined);
   }
 
   async dispose(): Promise<void> {

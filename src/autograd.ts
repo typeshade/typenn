@@ -1,5 +1,5 @@
 import { sameShape, sizeOf } from "./tensor/shape.js";
-import { Tensor } from "./tensor/tensor.js";
+import type { Tensor } from "./tensor/tensor.js";
 import { constantLike } from "./autograd/accumulate.js";
 import { topologicalOrder } from "./autograd/graph.js";
 import { applyGradientRule } from "./autograd/rules/index.js";
@@ -43,6 +43,20 @@ export function gradients(
   return wrt.map(
     (tensor) => accumulated.get(tensor) ?? constantLike(tensor, 0),
   );
+}
+
+/** Accumulate reverse-mode gradients on trainable input leaves. */
+export function backward(output: Tensor, upstream?: Tensor): void {
+  const parameters = topologicalOrder(output).filter(
+    (tensor) => tensor.requiresGrad && tensor.node.kind === "input",
+  );
+  if (parameters.length === 0)
+    throw new Error("backward() found no trainable parameters in the graph.");
+  const values = gradients(output, parameters, upstream);
+  for (const [index, parameter] of parameters.entries()) {
+    const gradient = values[index]!;
+    parameter.grad = parameter.grad ? parameter.grad.add(gradient) : gradient;
+  }
 }
 
 function makeUpstream(output: Tensor, upstream?: Tensor): Tensor {

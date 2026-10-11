@@ -7,6 +7,7 @@ import {
   executeUnary,
 } from "./elementwise.js";
 import { executeMatmul } from "./linear-algebra.js";
+import { executeReshape } from "./shape.js";
 import { executeSoftmax, executeSoftmaxGrad } from "./normalization.js";
 import { executeReduction, executeReductionGrad } from "./reductions.js";
 import {
@@ -43,6 +44,7 @@ export const GPU_NODE_EXECUTORS: GpuNodeExecutorMap = {
   softmaxCrossEntropyGrad: executeSoftmaxCrossEntropyGrad,
   reduce: executeReduction,
   softmaxCrossEntropy: executeSoftmaxCrossEntropy,
+  reshape: executeReshape,
 };
 
 export function executorFor<K extends GpuNodeKind>(
