@@ -21,6 +21,11 @@ export {
   type Pool2DOptions,
 } from "./tensor/tensor.js";
 export { gradients } from "./autograd.js";
+export {
+  inspectElementwiseFusion,
+  type ElementwiseFusionDecision,
+  type ElementwiseFusionRefusalCode,
+} from "./runtime/elementwise-fusion.js";
 export type { Shape } from "./tensor/shape.js";
 export { Module } from "./nn/module.js";
 export { Sequential } from "./nn/sequential.js";

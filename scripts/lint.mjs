@@ -14,7 +14,7 @@ async function filesIn(directory) {
 
 function removeTypeShadeDecorators(source) {
   return source
-    .replace(/^@compute\([^\n]+\)\n/gm, "")
+    .replace(/^@compute\([^\n]+\)\r?\n/gm, "")
     .replace(/@builtin\("global_invocation_id"\)\s*/g, "");
 }
 

@@ -6,6 +6,10 @@ import { Tensor } from "../tensor/tensor.js";
 import { evaluateCpu } from "./cpu-executor.js";
 import { DeviceBuffers } from "./device-buffers.js";
 import { GpuGraphExecutor } from "./gpu-graph-executor.js";
+import {
+  registerTensorConsumers,
+  type ElementwiseFusionDecision,
+} from "./elementwise-fusion.js";
 import { preparePipelines } from "./device-pipelines.js";
 import { isDevicePreference, selectRuntime } from "./device-runtime.js";
 import { runLinearTraining } from "./linear-training-executor.js";
@@ -42,6 +46,8 @@ export class Device {
   private runtime?: Runtime;
   private disposed = false;
   private disposing = false;
+  private _lastFusionDecision?: ElementwiseFusionDecision;
+  private _lastDispatchCount?: number;
 
   private constructor(
     backend: BackendInfo,
@@ -56,6 +62,10 @@ export class Device {
         runtime,
         this.pipelines,
         this.buffers,
+        (decision, dispatches) => {
+          this._lastFusionDecision = decision;
+          this._lastDispatchCount = dispatches;
+        },
       );
   }
 
@@ -174,7 +184,9 @@ export class Device {
   /** @internal */
   createOperation(shape: Shape, node: TensorNode): Tensor {
     this.assertUsable();
-    return new Tensor(this, checkedShape(shape), node);
+    const output = new Tensor(this, checkedShape(shape), node);
+    registerTensorConsumers(output, node);
+    return output;
   }
 
   /** @internal */
@@ -223,6 +235,16 @@ export class Device {
     this.runtime?.destroy();
     configure({ prefer: ["webgpu", "webgl2", "cpu"], runtime: null });
     if (activeDevice === this) activeDevice = undefined;
+  }
+
+  /** The fusion decision made for the most recent TypeShade graph execution. */
+  get lastFusionDecision(): ElementwiseFusionDecision | undefined {
+    return this._lastFusionDecision;
+  }
+
+  /** Number of TypeShade frame dispatches made by the most recent graph execution. */
+  get lastDispatchCount(): number | undefined {
+    return this._lastDispatchCount;
   }
 
   /** @internal */

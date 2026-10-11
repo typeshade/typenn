@@ -34,9 +34,13 @@ await bundle({
 
 try {
   await viteBuild({ configFile: `${configDir}/vite.config.mjs` });
-  execFileSync("node_modules/.bin/tsc", ["-p", "tsconfig.json"], {
-    stdio: "inherit",
-  });
+  execFileSync(
+    process.execPath,
+    ["node_modules/typescript/bin/tsc", "-p", "tsconfig.json"],
+    {
+      stdio: "inherit",
+    },
+  );
 } finally {
   // Keep generated TypeShade views available to tsc, but out of the source tree afterward.
   await removeGeneratedShadeViews("src");

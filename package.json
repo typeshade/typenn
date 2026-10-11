@@ -21,6 +21,7 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "lint": "node scripts/lint.mjs",
+    "test": "npm run build && node scripts/verify-elementwise-fusion.mjs",
     "prepack": "npm run build"
   },
   "files": [
