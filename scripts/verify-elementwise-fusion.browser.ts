@@ -10,6 +10,9 @@ import {
 } from "../src/runtime/elementwise-fusion-ir.ts";
 
 const result = document.querySelector("#result");
+const queryParams = new URLSearchParams(location.search);
+const extendedHardwareBenchmark = queryParams.get("benchmark") === "1";
+const runtimeAdapterOpens = [];
 function publishReport(report) {
   const body = JSON.stringify(report, null, 2);
   result.textContent = body;
@@ -33,18 +36,26 @@ const sampleValues = [
 ];
 const expectedValues = [12, 0, 0, 0];
 const assertParity = (actual, expected, label) => {
-  if (
-    actual.length !== expected.length ||
-    actual.some(
-      (value, index) =>
-        Math.abs(value - expected[index]) >
-        1e-5 * Math.max(1, Math.abs(expected[index])),
-    )
-  ) {
+  if (actual.length !== expected.length)
     throw new Error(
-      `${label} parity failed: ${JSON.stringify(actual)} vs ${JSON.stringify(expected)}.`,
+      `${label} length mismatch: ${actual.length} vs ${expected.length}.`,
     );
+  let maxAbsoluteError = 0;
+  for (let index = 0; index < actual.length; index++) {
+    const value = actual[index];
+    const reference = expected[index];
+    if (!Number.isFinite(value) || !Number.isFinite(reference))
+      throw new Error(
+        `${label}[${index}] is nonfinite: ${value} vs ${reference}.`,
+      );
+    const error = Math.abs(value - reference);
+    maxAbsoluteError = Math.max(maxAbsoluteError, error);
+    if (error > 1e-5 * Math.max(1, Math.abs(reference)))
+      throw new Error(
+        `${label}[${index}] mismatch: ${value} vs ${reference} (error ${error}).`,
+      );
   }
+  return { maxAbsoluteError, comparedElementCount: actual.length };
 };
 const expectedFor = (values) =>
   values[0].map((_, index) =>
@@ -70,14 +81,222 @@ const readAdapterDetails = (adapter) => {
       adapter.isFallbackAdapter ?? info?.isFallbackAdapter ?? "unavailable",
   };
 };
+const openWebgpuWithAdapterCapture = async () => {
+  const gpuApi = navigator.gpu;
+  const originalDescriptor = Object.getOwnPropertyDescriptor(
+    gpuApi,
+    "requestAdapter",
+  );
+  if (originalDescriptor && !originalDescriptor.configurable)
+    throw new Error(
+      "Cannot instrument the GPU adapter request for verification.",
+    );
+  const originalRequest = gpuApi.requestAdapter;
+  const requests = [];
+  Object.defineProperty(gpuApi, "requestAdapter", {
+    configurable: true,
+    enumerable: originalDescriptor?.enumerable ?? false,
+    writable: true,
+    value: function (...args) {
+      return Reflect.apply(originalRequest, this, args).then((adapter) => {
+        requests.push({
+          argumentCount: args.length,
+          options: args[0] ?? null,
+          adapter,
+        });
+        return adapter;
+      });
+    },
+  });
+  try {
+    const runtimeDevice = await device({ device: "webgpu" });
+    return { runtimeDevice, requests };
+  } finally {
+    if (originalDescriptor)
+      Object.defineProperty(gpuApi, "requestAdapter", originalDescriptor);
+    else delete gpuApi.requestAdapter;
+  }
+};
+
+const openRuntimeWebgpu = async (label) => {
+  if (!extendedHardwareBenchmark) return await device({ device: "webgpu" });
+  const capture = await openWebgpuWithAdapterCapture();
+  const runtimeDevice = capture.runtimeDevice;
+  if (runtimeDevice.backend.name !== "webgpu")
+    throw new Error(
+      `Hardware benchmark requires WebGPU; TypeNN selected ${runtimeDevice.backend.name} for ${label}.`,
+    );
+  if (capture.requests.length !== 1)
+    throw new Error(
+      `Expected exactly one Runtime adapter request for ${label}; captured ${capture.requests.length}.`,
+    );
+  const request = capture.requests[0];
+  if (!request?.adapter || request.argumentCount !== 0)
+    throw new Error(
+      `Runtime did not make the expected zero-argument adapter request for ${label}.`,
+    );
+  const adapter = readAdapterDetails(request.adapter);
+  if (
+    adapter.vendor.toLowerCase() !== "nvidia" ||
+    adapter.isFallbackAdapter !== false
+  )
+    throw new Error(
+      `Opt-in hardware benchmark requires the actual non-fallback NVIDIA adapter for ${label}; got ${JSON.stringify(adapter)}.`,
+    );
+  runtimeAdapterOpens.push({
+    ...adapter,
+    label,
+    runtimeBackend: runtimeDevice.backend.name,
+    requestOptions: request.options,
+    requestArgumentCount: request.argumentCount,
+  });
+  return runtimeDevice;
+};
+
+async function runOptInHardwareBenchmark(currentGpu, params) {
+  const readIntegerParameter = (name, fallback, minimum, maximum) => {
+    const raw = params.get(name);
+    if (raw === null) return fallback;
+    const value = Number(raw);
+    if (!Number.isInteger(value) || value < minimum || value > maximum)
+      throw new Error(
+        `Query parameter ${name} must be an integer from ${minimum} through ${maximum}.`,
+      );
+    return value;
+  };
+  const length = readIntegerParameter("length", 32_768, 32_768, 1_048_576);
+  if (length !== 32_768 && length !== 1_048_576)
+    throw new Error("Opt-in benchmark length must be 32768 or 1048576.");
+  const warmupsPerPath = readIntegerParameter("warmups", 5, 1, 10);
+  const samplesPerPath = readIntegerParameter("samples", 20, 20, 40);
+  const inputs = [
+    Float32Array.from({ length }, (_, index) => (((index * 17) % 19) - 9) / 4),
+    Float32Array.from({ length }, (_, index) => (((index * 7) % 13) - 6) / 2),
+    Float32Array.from({ length }, (_, index) => (((index * 5) % 11) - 5) / 4),
+  ];
+
+  await currentGpu.dispose();
+  const referenceDevice = await device({ device: "cpu" });
+  const referenceGraph = makeGraph(referenceDevice, inputs);
+  const referenceExecution = await evaluateCpuUnfusedWithStats(
+    referenceGraph.output,
+  );
+  if (referenceExecution.dispatches !== 3)
+    throw new Error(
+      `Expected 3 CPU reference dispatches; got ${referenceExecution.dispatches}.`,
+    );
+  const referenceValues = [...referenceExecution.value];
+  const referenceParity = assertParity(
+    referenceValues,
+    expectedFor(inputs),
+    "independent full-size TypeNN CPU reference",
+  );
+  await referenceDevice.dispose();
+
+  const gpu = await openRuntimeWebgpu("timed-samples");
+
+  async function measurePath(path) {
+    const forceUnfused = path === "nodewise";
+    const left = gpu.tensor(inputs[0], { shape: [length] });
+    const right = gpu.tensor(inputs[1], { shape: [length] });
+    const scale = gpu.tensor(inputs[2], { shape: [length] });
+    const sum = left.add(right);
+    const branchWitness = forceUnfused ? sum.neg() : undefined;
+    const value = sum.mul(scale).relu();
+    const startedAt = performance.now();
+    const output = await value.data();
+    const milliseconds = performance.now() - startedAt;
+    const dispatches = gpu.lastDispatchCount;
+    const decision = gpu.lastFusionDecision;
+    if (forceUnfused && !branchWitness)
+      throw new Error("The nodewise branch witness was lost.");
+    const parity = assertParity(output, referenceValues, `${path} full output`);
+    if (path === "fused") {
+      if (decision?.status !== "fused" || dispatches !== 1)
+        throw new Error(
+          `Fused benchmark sample used ${dispatches} dispatches or was refused.`,
+        );
+    } else if (
+      decision?.status !== "refused" ||
+      decision.code !== "observable-intermediate" ||
+      dispatches !== 3
+    ) {
+      throw new Error(
+        `Nodewise benchmark sample used ${dispatches} dispatches or did not refuse fusion.`,
+      );
+    }
+    return {
+      milliseconds,
+      dispatches,
+      maxAbsoluteError: parity.maxAbsoluteError,
+      comparedElementCount: parity.comparedElementCount,
+    };
+  }
+
+  const warmupOrder = [];
+  for (let index = 0; index < warmupsPerPath; index++) {
+    const order =
+      index % 2 === 0 ? ["fused", "nodewise"] : ["nodewise", "fused"];
+    warmupOrder.push(order);
+    for (const path of order) await measurePath(path);
+  }
+  const fusedSamples = [];
+  const nodewiseSamples = [];
+  const sampleOrder = [];
+  for (let index = 0; index < samplesPerPath; index++) {
+    const order =
+      index % 2 === 0 ? ["fused", "nodewise"] : ["nodewise", "fused"];
+    sampleOrder.push(order);
+    for (const path of order) {
+      const sample = await measurePath(path);
+      (path === "fused" ? fusedSamples : nodewiseSamples).push(sample);
+    }
+  }
+  const median = (samples) => {
+    const ordered = samples
+      .map((sample) => sample.milliseconds)
+      .sort((left, right) => left - right);
+    const middle = Math.floor(ordered.length / 2);
+    return ordered.length % 2 === 0
+      ? (ordered[middle - 1] + ordered[middle]) / 2
+      : ordered[middle];
+  };
+
+  return {
+    gpu,
+    report: {
+      mode: "opt-in-hardware",
+      length,
+      warmupsPerPath,
+      samplesPerPath,
+      adapter: runtimeAdapterOpens.at(-1),
+      runtimeAdapterOpens: [...runtimeAdapterOpens],
+      reference: {
+        backend: "TypeNN original nodewise CPU executor",
+        dispatches: referenceExecution.dispatches,
+        comparedElementCount: referenceValues.length,
+        maxAbsoluteError: referenceParity.maxAbsoluteError,
+      },
+      warmupOrder,
+      sampleOrder,
+      fusedSamples,
+      nodewiseSamples,
+      fusedMedianMs: median(fusedSamples),
+      nodewiseMedianMs: median(nodewiseSamples),
+      note: "Every timed output is measured through data() with the same inputs and full-output parity checked afterward against one independent CPU nodewise reference per shape. Cold compilation/runtime setup is outside the timed sample window; sample order alternates.",
+    },
+  };
+}
 
 try {
   result.textContent = "Requesting the WebGPU adapter…";
   if (!navigator.gpu) throw new Error("WebGPU is unavailable in this browser.");
-  const adapter = await navigator.gpu.requestAdapter();
-  if (!adapter)
+  const adapter = extendedHardwareBenchmark
+    ? undefined
+    : await navigator.gpu.requestAdapter();
+  if (!extendedHardwareBenchmark && !adapter)
     throw new Error("The browser did not provide a WebGPU adapter.");
-  const adapterInfo = readAdapterDetails(adapter);
+  const adapterInfo = adapter ? readAdapterDetails(adapter) : null;
 
   result.textContent = "Checking generated TypeNN CPU execution…";
   const cpu = await device({ device: "cpu" });
@@ -137,7 +356,7 @@ try {
 
   result.textContent = "Opening an explicitly requested WebGPU device…";
   const fusedDeviceOpenStartedAt = performance.now();
-  let gpu = await device({ device: "webgpu" });
+  let gpu = await openRuntimeWebgpu("cold-fused-and-primary-check");
   const coldFusedDeviceOpenMs = performance.now() - fusedDeviceOpenStartedAt;
   if (gpu.backend.name !== "webgpu")
     throw new Error(`Expected WebGPU; TypeNN selected ${gpu.backend.name}.`);
@@ -210,7 +429,7 @@ try {
   }
   await referenceDevice.dispose();
 
-  gpu = await device({ device: "webgpu" });
+  gpu = await openRuntimeWebgpu("bounds-and-rebinding-checks");
   const gpuComparisons = [];
   for (const testCase of gpuCases) {
     const graph = makeGraph(gpu, testCase.values, testCase.order);
@@ -263,7 +482,7 @@ try {
 
   result.textContent = "Measuring a cold refused GPU graph…";
   const unfusedDeviceOpenStartedAt = performance.now();
-  gpu = await device({ device: "webgpu" });
+  gpu = await openRuntimeWebgpu("cold-unfused");
   const coldUnfusedDeviceOpenMs =
     performance.now() - unfusedDeviceOpenStartedAt;
   if (gpu.backend.name !== "webgpu")
@@ -291,64 +510,83 @@ try {
       `Expected a cold 3-dispatch refusal; got ${JSON.stringify({ coldUnfusedDecision, coldUnfusedDispatchCount })}.`,
     );
 
-  const benchmarkSize = 32_768;
-  const benchmarkA = Float32Array.from(
-    { length: benchmarkSize },
-    (_, index) => (index % 4) - 2,
-  );
-  const benchmarkB = new Float32Array(benchmarkSize).fill(2);
-  const benchmarkC = Float32Array.from({ length: benchmarkSize }, (_, index) =>
-    index % 2 === 0 ? 3 : -3,
-  );
-  async function sample(forceUnfused) {
-    const left = gpu.tensor(benchmarkA, { shape: [benchmarkSize] });
-    const right = gpu.tensor(benchmarkB, { shape: [benchmarkSize] });
-    const scale = gpu.tensor(benchmarkC, { shape: [benchmarkSize] });
-    const sum = left.add(right);
-    const branch = forceUnfused ? sum.neg() : undefined;
-    const value = sum.mul(scale).relu();
-    const start = performance.now();
-    const output = await value.data();
-    assertParity([...output.slice(0, 4)], [0, 0, 6, 0], "benchmark sample");
-    return {
-      milliseconds: performance.now() - start,
-      dispatches: gpu.lastDispatchCount,
-      decision: gpu.lastFusionDecision,
-      branch,
+  let benchmark;
+  if (extendedHardwareBenchmark) {
+    const benchmarkResult = await runOptInHardwareBenchmark(gpu, queryParams);
+    gpu = benchmarkResult.gpu;
+    benchmark = benchmarkResult.report;
+  } else {
+    const benchmarkSize = 32_768;
+    const benchmarkA = Float32Array.from(
+      { length: benchmarkSize },
+      (_, index) => (index % 4) - 2,
+    );
+    const benchmarkB = new Float32Array(benchmarkSize).fill(2);
+    const benchmarkC = Float32Array.from(
+      { length: benchmarkSize },
+      (_, index) => (index % 2 === 0 ? 3 : -3),
+    );
+    async function sample(forceUnfused) {
+      const left = gpu.tensor(benchmarkA, { shape: [benchmarkSize] });
+      const right = gpu.tensor(benchmarkB, { shape: [benchmarkSize] });
+      const scale = gpu.tensor(benchmarkC, { shape: [benchmarkSize] });
+      const sum = left.add(right);
+      const branch = forceUnfused ? sum.neg() : undefined;
+      const value = sum.mul(scale).relu();
+      const start = performance.now();
+      const output = await value.data();
+      assertParity([...output.slice(0, 4)], [0, 0, 6, 0], "benchmark sample");
+      return {
+        milliseconds: performance.now() - start,
+        dispatches: gpu.lastDispatchCount,
+        decision: gpu.lastFusionDecision,
+        branch,
+      };
+    }
+    for (let index = 0; index < 2; index++) {
+      await sample(false);
+      await sample(true);
+    }
+    const fusedSamples = [];
+    const unfusedSamples = [];
+    for (let index = 0; index < 5; index++) {
+      fusedSamples.push(await sample(false));
+      unfusedSamples.push(await sample(true));
+    }
+    const median = (samples) =>
+      samples
+        .map((sample) => sample.milliseconds)
+        .sort((left, right) => left - right)[Math.floor(samples.length / 2)];
+    if (
+      fusedSamples.some((sample) => sample.dispatches !== 1) ||
+      unfusedSamples.some(
+        (sample) =>
+          sample.dispatches !== 3 ||
+          sample.decision?.status !== "refused" ||
+          sample.decision.code !== "observable-intermediate",
+      )
+    )
+      throw new Error(
+        "The benchmark did not execute a 1-vs-3 dispatch comparison.",
+      );
+    benchmark = {
+      shape: [benchmarkSize],
+      warmupsPerPath: 2,
+      samplesPerPath: 5,
+      fusedMedianMs: median(fusedSamples),
+      unfusedMedianMs: median(unfusedSamples),
+      fusedDispatches: 1,
+      unfusedDispatches: 3,
+      note: "Warm materialization timings; browser/device timings are observational.",
     };
   }
-  for (let index = 0; index < 2; index++) {
-    await sample(false);
-    await sample(true);
-  }
-  const fusedSamples = [];
-  const unfusedSamples = [];
-  for (let index = 0; index < 5; index++) {
-    fusedSamples.push(await sample(false));
-    unfusedSamples.push(await sample(true));
-  }
-  const median = (samples) =>
-    samples
-      .map((sample) => sample.milliseconds)
-      .sort((left, right) => left - right)[Math.floor(samples.length / 2)];
-  if (
-    fusedSamples.some((sample) => sample.dispatches !== 1) ||
-    unfusedSamples.some(
-      (sample) =>
-        sample.dispatches !== 3 ||
-        sample.decision?.status !== "refused" ||
-        sample.decision.code !== "observable-intermediate",
-    )
-  )
-    throw new Error(
-      "The benchmark did not execute a 1-vs-3 dispatch comparison.",
-    );
 
   publishReport({
     status: "passed",
     webgpu: {
       backend: gpu.backend,
-      adapter: adapterInfo,
+      adapter:
+        benchmark?.mode === "opt-in-hardware" ? benchmark.adapter : adapterInfo,
       decision: gpuDecision,
       actualDispatchCount: gpuDispatchCount,
       output: gpuValues,
@@ -387,16 +625,7 @@ try {
       multiplyDispatches: productDispatchCount,
     },
     gpuComparisons,
-    benchmark: {
-      shape: [benchmarkSize],
-      warmupsPerPath: 2,
-      samplesPerPath: 5,
-      fusedMedianMs: median(fusedSamples),
-      unfusedMedianMs: median(unfusedSamples),
-      fusedDispatches: 1,
-      unfusedDispatches: 3,
-      note: "Warm materialization timings; browser/device timings are observational.",
-    },
+    benchmark,
   });
   await gpu.dispose();
 } catch (error) {
