@@ -6,7 +6,7 @@ import Playground from "../../../components/Playground";
   <article class="playground-page">
     <nav class="breadcrumbs" aria-label="Breadcrumb"><a href="/ko/">TypeNN</a><span>/</span><span>Playground</span></nav>
     <header class="page-heading"><p class="eyebrow">브라우저에서 TypeNN 실행</p><h1>Tensor Playground</h1><p class="lead">행렬 값과 연산, 백엔드를 선택하고 사이트에 포함된 TypeNN 런타임으로 실행해 보세요.</p></header>
-    <Playground locale="ko" client:only="react" />
+    <Playground locale="ko" client:load />
     <div class="playground-disclosure"><p><strong>실행 대상:</strong> 사이트에 포함된 TypeNN 빌드와 TypeShade 런타임입니다. JavaScript로 다시 구현하거나 결과를 흉내 내지 않습니다.</p><p>예제는 작고, 런타임 시작 시 백엔드 준비가 포함됩니다. 시간을 성능 벤치마크로 표시하지 않습니다. 자동 모드는 WebGPU를 시도하고 CPU로 폴백합니다. WebGL2는 직접 선택해야 합니다.</p></div>
   </article>
 </SiteLayout>
