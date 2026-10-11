@@ -24,6 +24,7 @@ To refresh it from a local TypeNN checkout:
 
 ```sh
 cd /path/to/typenn
+npm ci
 npm run build
 cd website
 npm ci
