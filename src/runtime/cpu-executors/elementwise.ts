@@ -106,6 +106,7 @@ export const executeRelu: CpuNodeExecutor<"relu"> = async (
   tensor,
   node,
   evaluate,
+  onDispatch,
 ) => {
   const input = await evaluate(node.input);
   const output = createOutput(tensor);
@@ -113,6 +114,7 @@ export const executeRelu: CpuNodeExecutor<"relu"> = async (
     relu,
     { shape: { length: output.length }, input, output },
     output.length,
+    onDispatch,
   );
   return output;
 };
@@ -121,6 +123,7 @@ export const executeReluGrad: CpuNodeExecutor<"reluGrad"> = async (
   tensor,
   node,
   evaluate,
+  onDispatch,
 ) => {
   const [input, dy] = await Promise.all([
     evaluate(node.input),
@@ -131,6 +134,7 @@ export const executeReluGrad: CpuNodeExecutor<"reluGrad"> = async (
     reluGrad,
     { shape: { length: output.length }, input, dy, output },
     output.length,
+    onDispatch,
   );
   return output;
 };
@@ -139,6 +143,7 @@ export const executeUnary: CpuNodeExecutor<"unary"> = async (
   tensor,
   node,
   evaluate,
+  onDispatch,
 ) => {
   const input = await evaluate(node.input);
   const output = createOutput(tensor);
@@ -146,6 +151,7 @@ export const executeUnary: CpuNodeExecutor<"unary"> = async (
     UNARY_KERNELS[node.op],
     { shape: { length: output.length }, input, output },
     output.length,
+    onDispatch,
   );
   return output;
 };
@@ -154,6 +160,7 @@ export const executeSpecial: CpuNodeExecutor<"special"> = async (
   tensor,
   node,
   evaluate,
+  onDispatch,
 ) => {
   const input = await evaluate(node.input);
   const output = createOutput(tensor);
@@ -170,6 +177,7 @@ export const executeSpecial: CpuNodeExecutor<"special"> = async (
       output,
     },
     output.length,
+    onDispatch,
   );
   return output;
 };
@@ -178,6 +186,7 @@ export const executeBinary: CpuNodeExecutor<"binary"> = async (
   tensor,
   node,
   evaluate,
+  onDispatch,
 ) => {
   const [a, b] = await Promise.all([evaluate(node.a), evaluate(node.b)]);
   const output = createOutput(tensor);
@@ -196,6 +205,7 @@ export const executeBinary: CpuNodeExecutor<"binary"> = async (
       output,
     },
     output.length,
+    onDispatch,
   );
   return output;
 };
@@ -204,6 +214,7 @@ export const executeBinaryGrad: CpuNodeExecutor<"binaryGrad"> = async (
   tensor,
   node,
   evaluate,
+  onDispatch,
 ) => {
   const [a, b, dy] = await Promise.all([
     evaluate(node.a),
@@ -240,6 +251,7 @@ export const executeBinaryGrad: CpuNodeExecutor<"binaryGrad"> = async (
       output,
     },
     output.length,
+    onDispatch,
   );
   return output;
 };

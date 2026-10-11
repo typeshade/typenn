@@ -1,4 +1,9 @@
-import { resident, type Resident, type Runtime } from "typeshade/runtime";
+import {
+  resident,
+  type Pack,
+  type Resident,
+  type Runtime,
+} from "typeshade/runtime";
 import { sizeOf } from "../tensor/shape.js";
 import type { Tensor } from "../tensor/tensor.js";
 import type { Operation } from "./kernel-registry.js";
@@ -6,10 +11,16 @@ import { executorFor } from "./gpu-executors/index.js";
 import { DeviceBuffers } from "./device-buffers.js";
 import {
   analyzeElementwiseFusion,
+  type ElementwiseFusionCandidate,
   type ElementwiseFusionDecision,
 } from "./elementwise-fusion.js";
+import { elementwiseFusionGpuProgram } from "./elementwise-fusion-ir.js";
+
+const WORKGROUP_SIZE = 64;
 
 export class GpuGraphExecutor {
+  private readonly fusionPipelines = new Map<string, Promise<unknown>>();
+
   constructor(
     private readonly runtime: Runtime,
     private readonly pipelines: ReadonlyMap<Operation, unknown>,
@@ -26,8 +37,9 @@ export class GpuGraphExecutor {
     const scheduled = new Map<Tensor, Promise<Resident<Float32Array>>>();
     const analysis = analyzeElementwiseFusion(tensor);
     const candidate = "decision" in analysis ? analysis : undefined;
-    const decision =
-      candidate?.decision ?? (analysis as ElementwiseFusionDecision);
+    const decision: ElementwiseFusionDecision = candidate
+      ? candidate.decision
+      : (analysis as ElementwiseFusionDecision);
     const dispatched = () => dispatches++;
     const result = candidate
       ? await this.scheduleFused(
@@ -45,36 +57,39 @@ export class GpuGraphExecutor {
 
   private async scheduleFused(
     tensor: Tensor,
-    candidate: Extract<
-      ReturnType<typeof analyzeElementwiseFusion>,
-      { readonly decision: { readonly status: "fused" } }
-    >,
+    candidate: ElementwiseFusionCandidate,
     frame: ReturnType<Runtime["frame"]>,
     dispatched: () => void,
     scheduled: Map<Tensor, Promise<Resident<Float32Array>>>,
   ): Promise<Resident<Float32Array>> {
-    const output = this.buffers.track(
-      resident(new Float32Array(sizeOf(tensor.shape))),
-    );
+    const length = sizeOf(tensor.shape);
+    const output = this.buffers.track(resident(new Float32Array(length)));
+    if (length === 0) {
+      tensor.setMaterialized(output);
+      return output;
+    }
+
     try {
-      const [addA, addB, multiplier] = await Promise.all([
-        this.schedule(candidate.addA, frame, dispatched, scheduled),
-        this.schedule(candidate.addB, frame, dispatched, scheduled),
-        this.schedule(candidate.multiplier, frame, dispatched, scheduled),
+      const program = elementwiseFusionGpuProgram(candidate);
+      const [inputs, pipeline] = await Promise.all([
+        Promise.all(
+          candidate.leaves.map((leaf) =>
+            this.schedule(leaf, frame, dispatched, scheduled),
+          ),
+        ),
+        this.fusionPipeline(program.signature, program.pack, program.entry),
       ]);
-      const pipeline = this.pipelines.get("addMulRelu");
-      if (!pipeline)
-        throw new Error("TypeShade pipeline not prepared: addMulRelu.");
+      const bindings: Record<string, unknown> = {
+        shape: { length },
+        output,
+      };
+      for (let slot = 0; slot < inputs.length; slot++)
+        bindings[program.inputNames[slot]!] = inputs[slot]!;
+
       frame.dispatch(
         pipeline as never,
-        {
-          shape: { length: sizeOf(tensor.shape) },
-          addA,
-          addB,
-          multiplier,
-          output,
-        } as never,
-        Math.ceil(sizeOf(tensor.shape) / 64),
+        bindings as never,
+        Math.ceil(length / WORKGROUP_SIZE),
       );
       dispatched();
       tensor.setMaterialized(output);
@@ -83,6 +98,22 @@ export class GpuGraphExecutor {
       this.buffers.release(output);
       throw error;
     }
+  }
+
+  private fusionPipeline(
+    signature: string,
+    pack: Pack,
+    entry: string,
+  ): Promise<unknown> {
+    const cached = this.fusionPipelines.get(signature);
+    if (cached) return cached;
+    const pending = this.runtime.load(pack).compute(entry);
+    this.fusionPipelines.set(signature, pending);
+    void pending.catch(() => {
+      if (this.fusionPipelines.get(signature) === pending)
+        this.fusionPipelines.delete(signature);
+    });
+    return pending;
   }
 
   private schedule(

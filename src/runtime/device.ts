@@ -3,7 +3,7 @@ import { checkedShape, sizeOf, type Shape } from "../tensor/shape.js";
 import type { TensorNode } from "../tensor/node.js";
 import type { Operation } from "./kernel-registry.js";
 import { Tensor } from "../tensor/tensor.js";
-import { evaluateCpu } from "./cpu-executor.js";
+import { evaluateCpuWithStats } from "./cpu-executor.js";
 import { DeviceBuffers } from "./device-buffers.js";
 import { GpuGraphExecutor } from "./gpu-graph-executor.js";
 import {
@@ -208,8 +208,10 @@ export class Device {
     const existing = tensor.getMaterialized();
     if (existing instanceof Float32Array) return existing.slice();
     if (this.gpuExecutor) return this.gpuExecutor.execute(tensor);
-    const value = await evaluateCpu(tensor);
-    return value.slice();
+    const execution = await evaluateCpuWithStats(tensor);
+    this._lastFusionDecision = execution.decision;
+    this._lastDispatchCount = execution.dispatches;
+    return execution.value.slice();
   }
 
   /** @internal */
@@ -242,7 +244,7 @@ export class Device {
     return this._lastFusionDecision;
   }
 
-  /** Number of TypeShade frame dispatches made by the most recent graph execution. */
+  /** Number of actual compute dispatches made by the most recent TypeShade graph execution. */
   get lastDispatchCount(): number | undefined {
     return this._lastDispatchCount;
   }

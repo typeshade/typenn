@@ -1,7 +1,6 @@
 import type { Pack } from "typeshade/runtime";
 import reluPack from "../kernels/relu.shade.ts";
 import reluGradPack from "../kernels/relu-grad.shade.ts";
-import addMulReluPack from "../kernels/add-mul-relu.shade.ts";
 import binaryGradPack from "../kernels/binary-grad.shade.ts";
 import softmaxGradPack from "../kernels/softmax-grad.shade.ts";
 import addPack from "../kernels/add.shade.ts";
@@ -117,7 +116,6 @@ export type LinearTrainingEntry =
   | "linearBackward"
   | "linearUpdate";
 export type Operation =
-  | "addMulRelu"
   | "relu"
   | "reluGrad"
   | "binaryGrad"
@@ -144,7 +142,6 @@ export type Operation =
   | LinearTrainingEntry;
 
 export const PACKS: Record<Operation, Pack> = {
-  addMulRelu: addMulReluPack,
   relu: reluPack,
   reluGrad: reluGradPack,
   binaryGrad: binaryGradPack,
@@ -222,7 +219,6 @@ export const PACKS: Record<Operation, Pack> = {
 };
 
 export const ENTRYPOINT: Record<Operation, string> = {
-  addMulRelu: "addMulReluKernel",
   relu: "reluKernel",
   reluGrad: "reluGradKernel",
   binaryGrad: "binaryGradKernel",

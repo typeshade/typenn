@@ -18,6 +18,8 @@ export async function dispatchCpuKernel<Bindings>(
   kernel: CpuKernel<Bindings>,
   bindings: Bindings,
   logicalSize: number,
+  onDispatch?: () => void,
 ): Promise<void> {
   await kernel(bindings, workgroupsFor(logicalSize));
+  onDispatch?.();
 }

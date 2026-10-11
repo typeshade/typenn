@@ -6,6 +6,7 @@ export const executeReshape: CpuNodeExecutor<"reshape"> = async (
   tensor,
   node,
   evaluate,
+  onDispatch,
 ) => {
   const input = await evaluate(node.input);
   const output = createOutput(tensor);
@@ -13,6 +14,7 @@ export const executeReshape: CpuNodeExecutor<"reshape"> = async (
     reshapeKernel,
     { shape: { length: output.length }, input, output },
     output.length,
+    onDispatch,
   );
   return output;
 };

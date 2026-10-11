@@ -9,6 +9,7 @@ export type CpuNodeExecutor<K extends CpuNodeKind> = (
   tensor: Tensor,
   node: CpuNode<K>,
   evaluate: CpuEvaluator,
+  onDispatch?: () => void,
 ) => Promise<Float32Array>;
 
 export type CpuNodeExecutorMap = {

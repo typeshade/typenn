@@ -46,6 +46,7 @@ interface Conv2dGradientContext {
   readonly weights: Float32Array;
   readonly dy: Float32Array;
   readonly output: Float32Array;
+  readonly onDispatch?: () => void;
 }
 
 const CONVOLUTION_GRADIENT_EXECUTORS = {
@@ -73,6 +74,7 @@ const CONVOLUTION_GRADIENT_EXECUTORS = {
         output: context.output,
       },
       context.output.length,
+      context.onDispatch,
     ),
   conv2dFilterGrad: (context: Conv2dGradientContext) =>
     dispatchCpuKernel(
@@ -98,6 +100,7 @@ const CONVOLUTION_GRADIENT_EXECUTORS = {
         output: context.output,
       },
       context.output.length,
+      context.onDispatch,
     ),
 };
 
@@ -105,6 +108,7 @@ export const executePool2d: CpuNodeExecutor<"pool2d"> = async (
   tensor,
   node,
   evaluate,
+  onDispatch,
 ) => {
   const input = await evaluate(node.input);
   const output = createOutput(tensor);
@@ -135,6 +139,7 @@ export const executePool2d: CpuNodeExecutor<"pool2d"> = async (
       output,
     },
     output.length,
+    onDispatch,
   );
   return output;
 };
@@ -143,6 +148,7 @@ export const executePool2dGrad: CpuNodeExecutor<"pool2dGrad"> = async (
   tensor,
   node,
   evaluate,
+  onDispatch,
 ) => {
   const [input, dy] = await Promise.all([
     evaluate(node.input),
@@ -177,6 +183,7 @@ export const executePool2dGrad: CpuNodeExecutor<"pool2dGrad"> = async (
       output,
     },
     output.length,
+    onDispatch,
   );
   return output;
 };
@@ -185,6 +192,7 @@ export const executeConv2d: CpuNodeExecutor<"conv2d"> = async (
   tensor,
   node,
   evaluate,
+  onDispatch,
 ) => {
   const [input, weights] = await Promise.all([
     evaluate(node.input),
@@ -220,6 +228,7 @@ export const executeConv2d: CpuNodeExecutor<"conv2d"> = async (
       output,
     },
     output.length,
+    onDispatch,
   );
   return output;
 };
@@ -228,6 +237,7 @@ export const executeConv2dGrad: CpuNodeExecutor<"conv2dGrad"> = async (
   tensor,
   node,
   evaluate,
+  onDispatch,
 ) => {
   const [input, weights, dy] = await Promise.all([
     evaluate(node.input),
@@ -264,6 +274,7 @@ export const executeConv2dGrad: CpuNodeExecutor<"conv2dGrad"> = async (
     weights,
     dy,
     output,
+    onDispatch,
   };
   await CONVOLUTION_GRADIENT_EXECUTORS[node.op](context);
   return output;

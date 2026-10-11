@@ -23,6 +23,7 @@ export const executeReduction: CpuNodeExecutor<"reduce"> = async (
   tensor,
   node,
   evaluate,
+  onDispatch,
 ) => {
   const input = await evaluate(node.input);
   const output = createOutput(tensor);
@@ -38,6 +39,7 @@ export const executeReduction: CpuNodeExecutor<"reduce"> = async (
       output,
     },
     output.length,
+    onDispatch,
   );
   return output;
 };
@@ -46,6 +48,7 @@ export const executeReductionGrad: CpuNodeExecutor<"reduceGrad"> = async (
   tensor,
   node,
   evaluate,
+  onDispatch,
 ) => {
   const dy = await evaluate(node.dy);
   const output = createOutput(tensor);
@@ -62,6 +65,7 @@ export const executeReductionGrad: CpuNodeExecutor<"reduceGrad"> = async (
       reduceOutput: output,
     },
     output.length,
+    onDispatch,
   );
   return output;
 };

@@ -11,7 +11,7 @@ const CROSS_ENTROPY_GRADIENTS = {
 
 export const executeSoftmaxCrossEntropy: CpuNodeExecutor<
   "softmaxCrossEntropy"
-> = async (tensor, node, evaluate) => {
+> = async (tensor, node, evaluate, onDispatch) => {
   const [logits, labels] = await Promise.all([
     evaluate(node.logits),
     evaluate(node.labels),
@@ -26,13 +26,14 @@ export const executeSoftmaxCrossEntropy: CpuNodeExecutor<
       output,
     },
     node.rows,
+    onDispatch,
   );
   return output;
 };
 
 export const executeSoftmaxCrossEntropyGrad: CpuNodeExecutor<
   "softmaxCrossEntropyGrad"
-> = async (tensor, node, evaluate) => {
+> = async (tensor, node, evaluate, onDispatch) => {
   const [logits, labels, upstream] = await Promise.all([
     evaluate(node.logits),
     evaluate(node.labels),
@@ -53,6 +54,7 @@ export const executeSoftmaxCrossEntropyGrad: CpuNodeExecutor<
       gradient: output,
     },
     output.length,
+    onDispatch,
   );
   return output;
 };

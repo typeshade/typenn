@@ -6,6 +6,7 @@ export const executeMatmul: CpuNodeExecutor<"matmul"> = async (
   tensor,
   node,
   evaluate,
+  onDispatch,
 ) => {
   const [a, b] = await Promise.all([evaluate(node.a), evaluate(node.b)]);
   const output = createOutput(tensor);
@@ -25,6 +26,7 @@ export const executeMatmul: CpuNodeExecutor<"matmul"> = async (
       output,
     },
     rows * columns,
+    onDispatch,
   );
   return output;
 };

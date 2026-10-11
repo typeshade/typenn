@@ -162,6 +162,33 @@ unsupported.
 TypeShade's call-layer configuration is currently process-global, so TypeNN permits one active
 device per JavaScript context. Trainer support is limited to a single `Linear` classifier.
 
+### Elementwise graph fusion
+
+For an eligible same-shape `a.add(b).mul(c).relu()` graph, TypeNN walks the actual
+Tensor nodes and their operand order into a TypeShade `ModuleDecl`. That shared
+IR produces the CPU implementation through `compileModuleJs` and the GPU pack
+through `packModule`; it is not a separately authored fused shader. Structural
+program caches reuse code while binding the current graph's input values.
+
+The initial scope is deliberately limited to this three-operation chain with
+three distinct input tensors. Broadcasting, computed or aliased operands,
+gradient-requiring tensors, materialized intermediates, and externally consumed
+intermediates use the existing nodewise execution path. Fusion preserves the
+original Tensor DAG for later intermediate reads and autograd. A wrapped chain
+is not partially fused: selection applies to the requested output.
+
+The CPU path normally executes emitted JavaScript. If a content security policy
+blocks dynamic code generation, it uses the TypeShade interpreter for the same
+IR. Other compilation errors are propagated.
+
+`npm test` checks graph-derived IR against independent nodewise TypeNN execution
+and the TypeShade interpreter. The production browser harness additionally
+checks the packed GPU program and a consumer of the built library; run
+`npm run build && npm run build:elementwise-fusion:browser`.
+GPU timing includes dispatch, submission, and readback, so one dispatch does not
+by itself guarantee a proportional speedup. Dynamic IR compilation also has a
+first-use cost and requires TypeShade compiler code in the application bundle.
+
 ### Kernel source naming
 
 Each hand-authored TypeShade compute entrypoint has its own `<operation>.shade.ts` file, such as

@@ -13,6 +13,7 @@ export const executeSoftmax: CpuNodeExecutor<"softmax"> = async (
   tensor,
   node,
   evaluate,
+  onDispatch,
 ) => {
   const input = await evaluate(node.input);
   const output = createOutput(tensor);
@@ -29,6 +30,7 @@ export const executeSoftmax: CpuNodeExecutor<"softmax"> = async (
       output,
     },
     sliceCount,
+    onDispatch,
   );
   return output;
 };
@@ -37,6 +39,7 @@ export const executeSoftmaxGrad: CpuNodeExecutor<"softmaxGrad"> = async (
   tensor,
   node,
   evaluate,
+  onDispatch,
 ) => {
   const [value, dy] = await Promise.all([
     evaluate(node.value),
@@ -58,6 +61,7 @@ export const executeSoftmaxGrad: CpuNodeExecutor<"softmaxGrad"> = async (
       output,
     },
     sliceCount,
+    onDispatch,
   );
   return output;
 };

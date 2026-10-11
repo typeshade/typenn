@@ -24,11 +24,24 @@ export type ElementwiseFusionDecision =
       readonly reason: string;
     };
 
+export type ElementwiseFusionExpression =
+  | { readonly kind: "input"; readonly slot: number }
+  | {
+      readonly kind: "add" | "mul";
+      readonly left: ElementwiseFusionExpression;
+      readonly right: ElementwiseFusionExpression;
+    }
+  | { readonly kind: "relu"; readonly input: ElementwiseFusionExpression };
+
 export interface ElementwiseFusionCandidate {
   readonly decision: Extract<ElementwiseFusionDecision, { status: "fused" }>;
-  readonly addA: Tensor;
-  readonly addB: Tensor;
-  readonly multiplier: Tensor;
+  readonly output: Tensor;
+  /** Lowered expression derived by walking the original Tensor nodes. */
+  readonly expression: ElementwiseFusionExpression;
+  /** Distinct input leaves in first-visit graph order. */
+  readonly leaves: readonly Tensor[];
+  /** Operation order as observed by the graph walk. */
+  readonly operations: readonly ("add" | "mul" | "relu")[];
 }
 
 const consumers = new WeakMap<Tensor, WeakRef<Tensor>[]>();
@@ -59,6 +72,34 @@ function refuse(
   reason: string,
 ): ElementwiseFusionDecision {
   return { status: "refused", code, reason };
+}
+
+function walkExpression(
+  tensor: Tensor,
+  leaves: Tensor[],
+  operations: ("add" | "mul" | "relu")[],
+): ElementwiseFusionExpression | undefined {
+  const node = tensor.node;
+  if (node.kind === "input") {
+    const slot = leaves.indexOf(tensor);
+    if (slot >= 0) return { kind: "input", slot };
+    leaves.push(tensor);
+    return { kind: "input", slot: leaves.length - 1 };
+  }
+  if (node.kind === "relu") {
+    const input = walkExpression(node.input, leaves, operations);
+    if (!input) return undefined;
+    operations.push("relu");
+    return { kind: "relu", input };
+  }
+  if (node.kind === "binary" && (node.op === "add" || node.op === "mul")) {
+    const left = walkExpression(node.a, leaves, operations);
+    const right = walkExpression(node.b, leaves, operations);
+    if (!left || !right) return undefined;
+    operations.push(node.op);
+    return { kind: node.op, left, right };
+  }
+  return undefined;
 }
 
 /** Analyze the narrow same-shape add -> mul -> relu pattern for safe fusion. */
@@ -150,8 +191,6 @@ export function analyzeElementwiseFusion(
       "The add and multiply intermediates must each have exactly one live consumer.",
     );
 
-  // Keep the size check in the planner so malformed/overflowed shapes are refused before
-  // a device allocation or dispatch is attempted.
   try {
     sizeOf(output.shape);
   } catch {
@@ -161,11 +200,21 @@ export function analyzeElementwiseFusion(
     );
   }
 
+  const leaves: Tensor[] = [];
+  const operations: ("add" | "mul" | "relu")[] = [];
+  const expression = walkExpression(output, leaves, operations);
+  if (!expression || operations.length !== 3 || leaves.length !== 3)
+    return refuse(
+      "unsupported-chain",
+      "The candidate graph could not be lowered as one add, one multiply, and one ReLU.",
+    );
+
   return {
-    decision: { status: "fused", operations: 3, dispatches: 1 },
-    addA,
-    addB,
-    multiplier,
+    decision: { status: "fused", operations: operations.length, dispatches: 1 },
+    output,
+    expression,
+    leaves,
+    operations,
   };
 }
 
