@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="TypeShade">
+  <defs>
+    <linearGradient id="T" x1="18%" y1="8%" x2="78%" y2="96%">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset=".28" stop-color="#f4f6ff"/>
+      <stop offset=".62" stop-color="#d7e0ff"/>
+      <stop offset="1" stop-color="#9fb0ff"/>
+    </linearGradient>
+    <linearGradient id="sTop" x1="8%" y1="0%" x2="96%" y2="100%">
+      <stop offset="0" stop-color="#7ad2ff"/>
+      <stop offset=".42" stop-color="#5b86ff"/>
+      <stop offset="1" stop-color="#6a52f4"/>
+    </linearGradient>
+    <linearGradient id="sMid" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0" stop-color="#c5ceff"/>
+      <stop offset=".5" stop-color="#8b8ef8"/>
+      <stop offset="1" stop-color="#7a5aee"/>
+    </linearGradient>
+    <linearGradient id="sBottom" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0" stop-color="#4f6af0"/>
+      <stop offset=".48" stop-color="#7a3ef2"/>
+      <stop offset="1" stop-color="#c247f0"/>
+    </linearGradient>
+    <filter id="shadow" x="-25%" y="-25%" width="150%" height="160%">
+      <feDropShadow dx="0" dy="8" stdDeviation="9" flood-opacity=".35"/>
+    </filter>
+  </defs>
+  <g filter="url(#shadow)">
+    <path fill="url(#T)" d="M224 371L304 270Q309 267 320 267H688Q701 267 694 278L620 365Q614 372 601 372H506Q486 372 482 393L439 619Q435 640 418 652L327 714Q304 730 307 700L361 397Q365 373 346 373H232Q218 373 224 371Z"/>
+    <path fill="url(#sTop)" d="M476 499L609 385Q618 378 630 378H790Q803 378 793 389L675 499H476Z"/>
+    <path fill="url(#sMid)" d="M476 499H675L579 592L476 505Q472 502 476 499Z"/>
+    <path fill="url(#sBottom)" d="M579 592L675 499L793 589Q804 598 792 607L675 698Q665 706 651 706H455Q442 706 452 696L579 592Z"/>
+    <path d="M476 499H675L579 592L476 505Q472 502 476 499Z" fill="#d7dcff" opacity=".22"/>
+  </g>
+</svg>
