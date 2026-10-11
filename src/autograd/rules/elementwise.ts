@@ -10,6 +10,19 @@ type UnaryGradient = (
 ) => Tensor;
 
 const UNARY_GRADIENTS: Record<UnaryOperation, UnaryGradient> = {
+  acos: (input, _output, upstream) =>
+    upstream.div(scalarLike(input, 1).sub(input.square()).sqrt().neg()),
+  acosh: (input, _output, upstream) =>
+    upstream.div(input.square().sub(scalarLike(input, 1)).sqrt()),
+  asin: (input, _output, upstream) =>
+    upstream.div(scalarLike(input, 1).sub(input.square()).sqrt()),
+  asinh: (input, _output, upstream) =>
+    upstream.div(input.square().add(scalarLike(input, 1)).sqrt()),
+  atan: (input, _output, upstream) =>
+    upstream.div(input.square().add(scalarLike(input, 1))),
+  atanh: (input, _output, upstream) =>
+    upstream.div(scalarLike(input, 1).sub(input.square())),
+  step: (input) => constantLike(input, 0),
   neg: (_input, _output, upstream) => upstream.neg(),
   abs: (input, _output, upstream) => upstream.mul(input.sign()),
   square: (input, _output, upstream) =>

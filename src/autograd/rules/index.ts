@@ -9,6 +9,7 @@ import { conv2dGradient, pool2dGradient } from "./spatial.js";
 import { reductionGradient } from "./reductions.js";
 import { softmaxGradient } from "./normalization.js";
 import { softmaxCrossEntropyGradient } from "./loss.js";
+import { reshapeGradient } from "./shape.js";
 import type {
   DifferentiableNodeKind,
   GradientExecutionContext,
@@ -26,6 +27,7 @@ const GRADIENT_RULES: GradientRuleMap = {
   pool2d: pool2dGradient,
   reduce: reductionGradient,
   softmaxCrossEntropy: softmaxCrossEntropyGradient,
+  reshape: reshapeGradient,
 };
 
 export function applyGradientRule(context: GradientExecutionContext): void {

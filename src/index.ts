@@ -22,11 +22,25 @@ export {
 } from "./tensor/tensor.js";
 export { gradients } from "./autograd.js";
 export type { Shape } from "./tensor/shape.js";
-export { Module, Sequential } from "./nn/module.js";
-export { Linear, ReLU, type LinearOptions } from "./nn/layers.js";
+export { Module } from "./nn/module.js";
+export { Sequential } from "./nn/sequential.js";
+export {
+  CrossEntropyLoss,
+  crossEntropyLoss,
+  loss,
+  type CrossEntropyOptions,
+} from "./nn/loss/index.js";
+export {
+  Dense,
+  Dropout,
+  Flatten,
+  Linear,
+  ReLU,
+  type DropoutOptions,
+  type LinearOptions,
+} from "./nn/layers.js";
 export {
   createTrainer,
-  optim,
   Trainer,
   type ClassificationDataset,
   type EpochMetrics,
@@ -36,9 +50,22 @@ export {
   type TrainerOptions,
 } from "./nn/trainer.js";
 export {
+  optim,
+  Adam,
+  SGD,
+  type AdamOptions,
+  type SGDOptions as OptimizerSGDOptions,
+} from "./nn/optim/index.js";
+export {
+  acos,
+  acosh,
   abs,
   add,
   addN,
+  asin,
+  asinh,
+  atan,
+  atanh,
   avgPool,
   avgPoolGrad,
   argMax,
@@ -71,6 +98,7 @@ export {
   relu,
   relu6,
   reciprocal,
+  reshape,
   round,
   rsqrt,
   sigmoid,
@@ -84,6 +112,7 @@ export {
   prelu,
   prod,
   sqrt,
+  step,
   square,
   squaredDifference,
   sub,

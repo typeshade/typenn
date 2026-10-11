@@ -1,25 +1,14 @@
 import type { Device } from "../runtime/device.js";
 import { type LinearTrainingEntry } from "../runtime/device.js";
 import { Linear } from "./layers.js";
-
-export interface SGDOptions {
-  readonly learningRate: number;
-}
-
 export interface SGDOptimizer {
   readonly kind: "sgd";
   readonly learningRate: number;
 }
 
-export const optim = {
-  SGD(options: SGDOptions): SGDOptimizer {
-    if (!Number.isFinite(options.learningRate) || options.learningRate <= 0)
-      throw new RangeError(
-        "SGD learningRate must be a positive finite number.",
-      );
-    return { kind: "sgd", learningRate: options.learningRate };
-  },
-};
+export interface SGDOptions {
+  readonly learningRate: number;
+}
 
 export interface ClassificationDataset {
   /** Row-major f32 samples: `size * inputFeatures` values. */

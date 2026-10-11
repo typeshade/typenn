@@ -40,34 +40,59 @@ const logits = model.forward(device.tensor(pixels, { shape: [1, 784] }));
 const probabilities = await logits.softmax().data();
 ```
 
-The first training path follows TypeShade's MNIST computation example: one `Linear` classifier,
-integer labels, stable softmax cross entropy, an explicit TypeShade backward kernel, and SGD.
-The dataset stays in host memory and only the active batch is uploaded. CPU training calls the
-CPU functions generated from the same TypeShade kernels.
+## PyTorch-style model training
+
+Models can subclass `Module`, register layers, and implement `forward()`. Parameters are
+created on the device after `model.to(device)`. The training loop is explicit: select training
+mode, clear gradients, compute logits and loss, call `backward()`, and step the optimizer.
 
 ```ts
-const model = new nn.Linear(784, 10, { seed: 123, weightScale: 0.01 });
-const trainer = nn.createTrainer(model, {
-  device,
-  optimizer: nn.optim.SGD({ learningRate: 0.1 }),
-});
+class SimpleMLP extends nn.Module {
+  private readonly flatten = this.register("flatten", new nn.Flatten());
+  private readonly fc1 = this.register("fc1", new nn.Linear(784, 128));
+  private readonly relu = this.register("relu", new nn.ReLU());
+  private readonly dropout = this.register("dropout", new nn.Dropout(0.2));
+  private readonly fc2 = this.register("fc2", new nn.Linear(128, 10));
 
-await trainer.fit(
-  { inputs: trainPixels, labels: trainLabels },
-  {
-    epochs: 5,
-    batchSize: 32,
-    onEpoch: ({ epoch, loss, accuracy }) => console.log(epoch, loss, accuracy),
-  },
-);
+  forward(input: nn.Tensor): nn.Tensor {
+    return this.fc2.forward(
+      this.dropout.forward(
+        this.relu.forward(this.fc1.forward(this.flatten.forward(input))),
+      ),
+    );
+  }
+}
 
-await trainer.dispose();
+const model = new SimpleMLP().to(device);
+const optimizer = nn.optim.Adam(model.parameters(), { lr: 0.001 });
+const criterion = new nn.CrossEntropyLoss();
+model.train();
+
+for await (const batch of batches) {
+  await optimizer.zeroGrad();
+  const images = device.tensor(batch.images, {
+    shape: [batch.size, 1, 28, 28],
+  });
+  const logits = model.forward(images);
+  const loss = criterion.forward(logits, batch.labels); // integer class IDs
+  await loss.backward();
+  await optimizer.step();
+  await loss.disposeGraph(model.parameters());
+}
+
+model.eval();
 ```
 
-This initial Trainer only accepts a single `Linear` module and SGD. It uses an explicit
-backward kernel like the TypeShade MNIST example; it does not yet build gradients from the
-Tensor graph. Model weights are copied back after training so the same `Linear` can be used
-for inference.
+The complete IDX dataset loader, shuffled batch loop, and evaluation example are in
+[`examples/mnist`](./examples/mnist). It keeps images as uint8 on the host, normalizes each
+batch, uses logits directly with sparse-label cross entropy, and evaluates by argmax. Tensor
+forward and backward operations use the selected TypeShade device. Adam moment calculation and
+parameter updates currently use host arrays, so this example demonstrates the API rather than
+optimized training throughput.
+
+The earlier `createTrainer()` convenience path remains limited to a single `Linear` classifier
+and SGD. The explicit PyTorch-style loop supports a custom `Module` with multiple Linear layers,
+ReLU, Dropout, and the current Tensor-graph gradient rules.
 
 TypeShade owns the shader language and GPU execution runtime. TypeNN's internal `.shade.ts`
 kernels are compiled during the library build; applications use TypeNN's Tensor and Module API
@@ -122,11 +147,13 @@ unsupported.
 - Tensor operation calls construct a lazy dependency graph; the first result read executes it.
 - Pure numerical operations use TypeShade kernels for GPU and CPU execution; no separate JS
   production math implementation is maintained.
-- Intermediate tensors remain resident until disposed or the device is disposed.
-- `Module`, `Linear`, and `Sequential` support inference graph composition; `Linear` also
-  supports the initial single-layer SGD Trainer.
-- Tensor-graph autograd has an initial limited reverse-mode path; Adam, dataset loaders, model
-  files, and WebNN are not implemented yet.
+- Intermediate tensors remain resident until disposed or the device is disposed; use
+  `disposeGraph()` to release an operation graph while preserving parameters.
+- `Module.to()`, `parameters()`, `train()`, and `eval()` support user-defined models and
+  registered child layers. `Flatten`, `Linear`/`Dense`, `ReLU`, and `Dropout` cover the example.
+- `Tensor.backward()` accumulates gradients on registered parameter leaves. SGD and Adam
+  optimizer objects update host parameter arrays; Adam is not yet a device kernel.
+- Tensor-graph autograd remains limited; model serialization and WebNN are not implemented.
   The standalone softmax-cross-entropy operation returns one loss per row; the Trainer's
   explicit backward kernel computes its gradient separately.
 - `shadeGrad`/`shadeGradCheck` operate on pure TypeShade functions only; Conv2D and pooling

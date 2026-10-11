@@ -1,6 +1,11 @@
 import type { Tensor } from "../tensor.js";
 
 export type UnaryOperation =
+  | "acos"
+  | "acosh"
+  | "asin"
+  | "asinh"
+  | "atan"
   | "neg"
   | "abs"
   | "square"
@@ -21,7 +26,9 @@ export type UnaryOperation =
   | "expm1"
   | "log1p"
   | "sinh"
-  | "cosh";
+  | "cosh"
+  | "atanh"
+  | "step";
 
 /** @internal */
 export interface UnaryNode {

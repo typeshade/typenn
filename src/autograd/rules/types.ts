@@ -11,7 +11,8 @@ export type DifferentiableNodeKind =
   | "conv2d"
   | "pool2d"
   | "reduce"
-  | "softmaxCrossEntropy";
+  | "softmaxCrossEntropy"
+  | "reshape";
 
 export type GradientRuleContext<
   K extends DifferentiableNodeKind = DifferentiableNodeKind,

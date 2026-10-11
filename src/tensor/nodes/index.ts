@@ -16,6 +16,7 @@ import type { ReduceNode } from "./reduce.js";
 import type { ReduceGradNode } from "./reduce-grad.js";
 import type { SoftmaxCrossEntropyNode } from "./softmax-cross-entropy.js";
 import type { SoftmaxCrossEntropyGradNode } from "./softmax-cross-entropy-grad.js";
+import type { ReshapeNode } from "./reshape.js";
 
 export type { BinaryOperation, BinaryNode } from "./binary.js";
 export type { BinaryGradNode } from "./binary-grad.js";
@@ -27,6 +28,7 @@ export type { Pool2dNode } from "./pool2d.js";
 export type { Pool2dGradNode } from "./pool2d-grad.js";
 export type { ReduceNode, ReductionOperation } from "./reduce.js";
 export type { ReduceGradNode } from "./reduce-grad.js";
+export type { ReshapeNode } from "./reshape.js";
 export type { ReluNode } from "./relu.js";
 export type { ReluGradNode } from "./relu-grad.js";
 export type { SoftmaxNode } from "./softmax.js";
@@ -55,4 +57,5 @@ export type TensorNode =
   | ReduceNode
   | ReduceGradNode
   | SoftmaxCrossEntropyNode
-  | SoftmaxCrossEntropyGradNode;
+  | SoftmaxCrossEntropyGradNode
+  | ReshapeNode;

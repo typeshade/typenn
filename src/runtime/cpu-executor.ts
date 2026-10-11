@@ -10,6 +10,7 @@ import {
   executeUnary,
 } from "./cpu-executors/elementwise.js";
 import { executeMatmul } from "./cpu-executors/linear-algebra.js";
+import { executeReshape } from "./cpu-executors/shape.js";
 import {
   executeSoftmaxCrossEntropy,
   executeSoftmaxCrossEntropyGrad,
@@ -53,6 +54,7 @@ const NODE_EXECUTORS: CpuNodeExecutorMap = {
   softmaxCrossEntropyGrad: executeSoftmaxCrossEntropyGrad,
   reduce: executeReduction,
   softmaxCrossEntropy: executeSoftmaxCrossEntropy,
+  reshape: executeReshape,
 };
 
 const pendingEvaluations = new WeakMap<Tensor, Promise<Float32Array>>();

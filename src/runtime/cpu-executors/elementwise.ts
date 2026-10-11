@@ -1,6 +1,12 @@
 import type { Tensor } from "../../tensor/tensor.js";
 import { BinaryOperation } from "../../kernels/binary-grad.shade.ts";
 import { absKernel } from "../../kernels/abs.shade.ts";
+import { acosKernel } from "../../kernels/acos.shade.ts";
+import { acoshKernel } from "../../kernels/acosh.shade.ts";
+import { asinKernel } from "../../kernels/asin.shade.ts";
+import { asinhKernel } from "../../kernels/asinh.shade.ts";
+import { atanKernel } from "../../kernels/atan.shade.ts";
+import { atanhKernel } from "../../kernels/atanh.shade.ts";
 import { ceilKernel } from "../../kernels/ceil.shade.ts";
 import { cosKernel } from "../../kernels/cos.shade.ts";
 import { coshKernel } from "../../kernels/cosh.shade.ts";
@@ -19,6 +25,7 @@ import { sinKernel } from "../../kernels/sin.shade.ts";
 import { sinhKernel } from "../../kernels/sinh.shade.ts";
 import { sqrtKernel } from "../../kernels/sqrt.shade.ts";
 import { squareKernel } from "../../kernels/square.shade.ts";
+import { stepKernel } from "../../kernels/step.shade.ts";
 import { tanKernel } from "../../kernels/tan.shade.ts";
 import { tanhKernel } from "../../kernels/tanh.shade.ts";
 import { addKernel } from "../../kernels/add.shade.ts";
@@ -42,6 +49,13 @@ import { createOutput, dispatchCpuKernel } from "./common.js";
 import type { CpuNodeExecutor } from "./types.js";
 
 const UNARY_KERNELS = {
+  acos: acosKernel,
+  acosh: acoshKernel,
+  asin: asinKernel,
+  asinh: asinhKernel,
+  atan: atanKernel,
+  atanh: atanhKernel,
+  step: stepKernel,
   neg: negKernel,
   abs: absKernel,
   square: squareKernel,
