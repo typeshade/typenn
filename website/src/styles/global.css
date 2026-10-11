@@ -184,7 +184,7 @@
 .theme-control { display: inline-flex; align-items: center; gap: 8px; }
 .theme-control .ant-switch { min-width: 36px; }
 .page-frame { display: grid; grid-template-columns: 224px minmax(0, 1fr); gap: 56px; width: min(1440px, 100%); min-height: calc(100vh - 140px); padding: 44px 32px 84px; margin: 0 auto; }
-.page-frame.home-frame, .page-frame.playground-frame { display: block; max-width: 1440px; }
+.page-frame.home-frame { display: block; max-width: 1440px; }
 .docs-sidebar { align-self: start; position: sticky; top: 100px; padding: 8px 18px 24px 0; }
 .sidebar-home { display: block; padding: 6px 10px 18px; font-size: 14px; font-weight: 650; }
 .sidebar-group { margin: 0 0 20px; }
