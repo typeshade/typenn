@@ -21,6 +21,7 @@ function removeTypeShadeDecorators(source) {
 const sourceFiles = await filesIn("src");
 const scriptFiles = await filesIn("scripts");
 const exampleFiles = await filesIn("examples");
+const testFiles = await filesIn("tests");
 const configFiles = [
   "README.md",
   "TODO.md",
@@ -29,7 +30,13 @@ const configFiles = [
   "tsconfig.json",
   "vite.config.ts",
 ];
-const files = [...sourceFiles, ...scriptFiles, ...exampleFiles, ...configFiles];
+const files = [
+  ...sourceFiles,
+  ...scriptFiles,
+  ...exampleFiles,
+  ...testFiles,
+  ...configFiles,
+];
 const failures = [];
 
 for (const path of files) {
