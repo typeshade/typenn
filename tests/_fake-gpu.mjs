@@ -8,6 +8,7 @@ const STORAGE = 128;
 
 export function fakeGpu(options = {}) {
   const commands = [];
+  let pops = 0;
   /** The WGSL of every shader module the device was asked to make. */
   const shaders = [];
   /** Every buffer the device was asked to make, in order. */
@@ -54,7 +55,15 @@ export function fakeGpu(options = {}) {
     createBindGroup: () => ({}),
     createCommandEncoder: () => encoder,
     pushErrorScope: () => {},
-    popErrorScope: async () => null,
+    // `validation` makes the error scopes report a validation error: every one, or only the
+    // `validationAt`-th (counting from 1), which fails one plan and lets the next run.
+    popErrorScope: async () => {
+      pops++;
+      const fails =
+        options.validation !== undefined &&
+        (options.validationAt === undefined || options.validationAt === pops);
+      return fails ? { message: options.validation } : null;
+    },
     queue: {
       writeBuffer: (target) => {
         if (target.record !== undefined) target.record.written = true;
