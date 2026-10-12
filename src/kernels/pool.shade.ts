@@ -7,7 +7,7 @@
 
 export function maxPool(
   out: array<f32>,
-  input: array<f32>,
+  source: array<f32>,
   height: u32,
   width: u32,
   channels: u32,
@@ -39,7 +39,7 @@ export function maxPool(
           continue;
         }
         const candidate =
-          input[
+          source[
             ((batch * height + u32(inputY)) * width + u32(inputX)) * channels +
               channel
           ];
@@ -55,7 +55,7 @@ export function maxPool(
 
 export function avgPool(
   out: array<f32>,
-  input: array<f32>,
+  source: array<f32>,
   height: u32,
   width: u32,
   channels: u32,
@@ -87,7 +87,7 @@ export function avgPool(
           continue;
         }
         total +=
-          input[
+          source[
             ((batch * height + u32(inputY)) * width + u32(inputX)) * channels +
               channel
           ];
@@ -105,7 +105,7 @@ export function avgPool(
  */
 export function maxPoolGrad(
   out: array<f32>,
-  input: array<f32>,
+  source: array<f32>,
   dy: array<f32>,
   height: u32,
   width: u32,
@@ -167,7 +167,7 @@ export function maxPoolGrad(
             }
             const candidateIndex =
               inputBatchOffset + (u32(y) * width + u32(x)) * channels + channel;
-            const candidate = input[candidateIndex];
+            const candidate = source[candidateIndex];
             if (found === false || candidate > bestValue) {
               bestValue = candidate;
               bestIndex = candidateIndex;

@@ -1,14 +1,16 @@
 "use typeshade";
 
-// 2D convolution over NHWC input [batch, height, width, inChannels] with an HWIO filter
-// [kernelHeight, kernelWidth, inChannels, outChannels]. One invocation for each element of the
-// array it writes, which loops over the window. `outHeight`, `outWidth`, the strides and `padTop`
-// and `padLeft` are the window of the operation, as `spatialWindow` works them out on the host.
+// 2D convolution over NHWC input `x` [batch, height, width, inChannels] with an HWIO filter,
+// `weights` [kernelHeight, kernelWidth, inChannels, outChannels]. One invocation for each element
+// of the array it writes, which loops over the window. `outHeight`, `outWidth`, the strides and
+// `padTop` and `padLeft` are the window of the operation, as `spatialWindow` works them out on
+// the host. The filter is `weights` and not `filter`: `filter` is a reserved word of WGSL, and
+// TypeShade 5fb79c7 names the storage binding of an array parameter after the parameter.
 
 export function conv2d(
   out: array<f32>,
-  input: array<f32>,
-  filter: array<f32>,
+  x: array<f32>,
+  weights: array<f32>,
   height: u32,
   width: u32,
   inChannels: u32,
@@ -48,7 +50,7 @@ export function conv2d(
             ((kernelY * kernelWidth + kernelX) * inChannels + channel) *
               outChannels +
             outputChannel;
-          value += input[inputIndex] * filter[filterIndex];
+          value += x[inputIndex] * weights[filterIndex];
         }
       }
     }
@@ -59,7 +61,7 @@ export function conv2d(
 /** The gradient of `conv2d` with respect to its input: one invocation for each input element. */
 export function conv2dInputGrad(
   out: array<f32>,
-  filter: array<f32>,
+  weights: array<f32>,
   dy: array<f32>,
   height: u32,
   width: u32,
@@ -117,7 +119,7 @@ export function conv2dInputGrad(
             outChannels +
           channelOffset;
         for (let channel: u32 = 0; channel < outChannels; channel++) {
-          total += dy[outputOffset + channel] * filter[kernelOffset + channel];
+          total += dy[outputOffset + channel] * weights[kernelOffset + channel];
         }
       }
     }
@@ -128,7 +130,7 @@ export function conv2dInputGrad(
 /** The gradient of `conv2d` with respect to its filter: one invocation for each filter element. */
 export function conv2dFilterGrad(
   out: array<f32>,
-  input: array<f32>,
+  x: array<f32>,
   dy: array<f32>,
   batch: u32,
   height: u32,
@@ -164,7 +166,7 @@ export function conv2dFilterGrad(
             ((b * height + u32(iy)) * width + u32(ix)) * inChannels + ic;
           const outputIndex =
             ((b * outHeight + oy) * outWidth + ox) * outChannels + oc;
-          total += input[inputIndex] * dy[outputIndex];
+          total += x[inputIndex] * dy[outputIndex];
         }
       }
     }
