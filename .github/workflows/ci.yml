@@ -1,0 +1,47 @@
+name: CI
+
+# Two jobs, as TypeShade's own CI has them. `cpu` builds the library, checks the format and runs
+# `npm test`: the numerics of every operation on the CPU tier against a plain-JavaScript model, the
+# plans on a recording fake WebGPU device, the instrument that plants faults, and the MNIST example
+# on the CPU tier. `gpu` runs the same cases, the plans and the example on a real WebGPU device
+# (headless Chromium on SwiftShader), and holds them to the CPU tier.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  cpu:
+    name: cpu (Node 22)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+
+  gpu:
+    name: gpu (Chromium, WebGPU on SwiftShader)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # The browser comes from the project's own playwright-core, at the revision that version
+      # names. `--only-shell` installs chromium-headless-shell, which a headless
+      # `chromium.launch()` runs.
+      - run: npx playwright-core install --with-deps --only-shell chromium
+      - run: npm run test:gpu
