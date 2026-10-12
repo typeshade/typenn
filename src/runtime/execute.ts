@@ -17,24 +17,29 @@ export interface Memory {
 }
 
 /**
- * Compute a tensor and read it back. The operations under it that have no array yet are the
+ * Compute tensors and read them back. The operations under them that have no array yet are the
  * calls of one `fuse` scope, in the order of the graph, and the compiler runs the scope as one
  * plan on the tier `configure({ prefer })` selects: on WebGPU one submission, with the calls the
  * compiler's facts allow in one dispatch. A tensor that already has an array is a leaf of the
  * scope. Every operation keeps its array, so a later read, and the gradient graph, find it.
  */
 export async function execute(
-  root: Tensor,
+  roots: readonly Tensor[],
   memory: Memory,
-): Promise<Float32Array> {
-  // A tensor the caller made holds its values on the host.
-  if (root.node.kind === "input") return root.node.value.slice();
+): Promise<Float32Array[]> {
   const pending = postOrder(
-    root,
+    roots,
     (tensor) => tensor.storage !== undefined || tensor.node.kind === "input",
   );
   if (pending.length > 0) await plan(pending, memory);
-  return root.storage!.read();
+  // A tensor the caller made holds its values on the host.
+  return Promise.all(
+    roots.map((root) =>
+      root.node.kind === "input"
+        ? root.node.value.slice()
+        : root.storage!.read(),
+    ),
+  );
 }
 
 async function plan(pending: readonly Tensor[], memory: Memory): Promise<void> {

@@ -17,18 +17,12 @@ export class SGD extends Optimizer {
   }
 
   async step(): Promise<void> {
-    const updates = [];
-    for (const parameter of this.parameters) {
-      updates.push({
-        parameter,
-        values: parameter.parameterValues().slice(),
-        gradient: await this.gradient(parameter),
-      });
-    }
-    for (const { parameter, values, gradient } of updates) {
-      const updated = values;
-      for (let index = 0; index < updated.length; index++)
-        updated[index] -= this.learningRate * gradient[index]!;
+    const gradients = await this.gradients();
+    for (const [index, parameter] of this.parameters.entries()) {
+      const updated = parameter.parameterValues().slice();
+      const gradient = gradients[index]!;
+      for (let element = 0; element < updated.length; element++)
+        updated[element] -= this.learningRate * gradient[element]!;
       await parameter.assign(updated);
     }
   }

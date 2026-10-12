@@ -6,17 +6,21 @@ function parents(tensor: Tensor): readonly Tensor[] {
 }
 
 /**
- * The tensors `output` is computed from, each after the tensors it reads and `output` last.
- * A tensor for which `stop` is true ends the walk: it is not in the list, and nor is anything
- * only it reads. The walk is iterative, so a deep graph does not exhaust the call stack.
+ * The tensors `outputs` are computed from, each after the tensors it reads, and each output
+ * after the ones before it. A tensor for which `stop` is true ends the walk: it is not in the list,
+ * and nor is anything only it reads. The walk is iterative, so a deep graph does not exhaust the
+ * call stack.
  */
 export function postOrder(
-  output: Tensor,
+  outputs: Tensor | readonly Tensor[],
   stop: (tensor: Tensor) => boolean = () => false,
 ): Tensor[] {
   const order: Tensor[] = [];
   const seen = new Map<Tensor, "open" | "done">();
-  const stack: Tensor[] = [output];
+  // The first output is walked first.
+  const stack: Tensor[] = (
+    Array.isArray(outputs) ? [...outputs] : [outputs as Tensor]
+  ).reverse();
   while (stack.length > 0) {
     const tensor = stack[stack.length - 1]!;
     const state = seen.get(tensor);

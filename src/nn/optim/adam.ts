@@ -39,38 +39,31 @@ export class Adam extends Optimizer {
   }
 
   async step(): Promise<void> {
-    if (this.parameters.some((parameter) => !parameter.grad))
-      throw new Error("Call backward() before optimizer.step().");
+    const gradients = await this.gradients();
     this.iteration++;
     const firstCorrection = 1 - this.beta1 ** this.iteration;
     const secondCorrection = 1 - this.beta2 ** this.iteration;
-    const updates = [];
-    for (const parameter of this.parameters) {
-      updates.push({
-        parameter,
-        values: parameter.parameterValues().slice(),
-        gradient: await this.gradient(parameter),
-      });
-    }
-    for (const { parameter, values, gradient } of updates) {
+    for (const [index, parameter] of this.parameters.entries()) {
+      const updated = parameter.parameterValues().slice();
+      const gradient = gradients[index]!;
       let moment = this.moments.get(parameter);
       if (!moment) {
         moment = {
-          first: new Float32Array(values.length),
-          second: new Float32Array(values.length),
+          first: new Float32Array(updated.length),
+          second: new Float32Array(updated.length),
         };
         this.moments.set(parameter, moment);
       }
-      const updated = values;
-      for (let index = 0; index < updated.length; index++) {
-        const value = gradient[index]!;
-        moment.first[index] =
-          this.beta1 * moment.first[index]! + (1 - this.beta1) * value;
-        moment.second[index] =
-          this.beta2 * moment.second[index]! + (1 - this.beta2) * value * value;
-        const first = moment.first[index]! / firstCorrection;
-        const second = moment.second[index]! / secondCorrection;
-        updated[index] -=
+      for (let element = 0; element < updated.length; element++) {
+        const value = gradient[element]!;
+        moment.first[element] =
+          this.beta1 * moment.first[element]! + (1 - this.beta1) * value;
+        moment.second[element] =
+          this.beta2 * moment.second[element]! +
+          (1 - this.beta2) * value * value;
+        const first = moment.first[element]! / firstCorrection;
+        const second = moment.second[element]! / secondCorrection;
+        updated[element] -=
           (this.learningRate * first) / (Math.sqrt(second) + this.epsilon);
       }
       await parameter.assign(updated);

@@ -166,8 +166,13 @@ export class Device {
 
   /** @internal */
   materialize(tensor: Tensor): Promise<Float32Array> {
+    return this.materializeAll([tensor]).then(([values]) => values!);
+  }
+
+  /** @internal Compute and read several tensors in one plan. */
+  materializeAll(tensors: readonly Tensor[]): Promise<Float32Array[]> {
     this.assertUsable();
-    const task: Promise<Float32Array> = execute(tensor, this.memory).finally(
+    const task: Promise<Float32Array[]> = execute(tensors, this.memory).finally(
       () => this.pending.delete(task),
     );
     this.pending.add(task);
