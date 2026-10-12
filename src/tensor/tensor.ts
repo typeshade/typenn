@@ -1,3 +1,4 @@
+import type { Resident } from "typeshade/runtime";
 import type { Device } from "../runtime/device.js";
 import type { Shape } from "./shape.js";
 import { topologicalOrder } from "../autograd/graph.js";
@@ -13,30 +14,29 @@ import {
   special,
   unary,
 } from "./operations/elementwise.js";
-import {
-  conv2d,
-  conv2dGradients,
-  matmul,
-  type MatmulOptions,
-} from "./operations/linear-algebra.js";
-import { softmaxCrossEntropyWithLogits } from "./operations/loss.js";
-import { softmax } from "./operations/normalization.js";
-import { reduce } from "./operations/reductions.js";
-import { pool2d, pool2dGrad } from "./operations/spatial.js";
 import { reshape } from "./operations/shape.js";
 import type { Conv2DOptions, Pool2DOptions } from "./spatial.js";
 
 export type { Conv2DOptions, Pool2DOptions } from "./spatial.js";
 
-interface ResidentValue {
-  read(): Promise<Float32Array>;
-  destroy(): void;
+export interface MatmulOptions {
+  readonly transposeA?: boolean;
+  readonly transposeB?: boolean;
 }
 
-type TensorStorage = Float32Array | ResidentValue;
+/** Until the operation has its kernel functions. */
+function notYet(operation: string): never {
+  throw new Error(
+    `TypeNN operation ${operation} is not on kernel functions yet.`,
+  );
+}
 
 export class Tensor {
-  private materialized?: TensorStorage;
+  /**
+   * @internal The resident array that holds the value. A plan makes it when it computes the
+   * tensor, and the first plan that reads a tensor the caller made uploads it.
+   */
+  storage?: Resident<Float32Array>;
   private disposed = false;
 
   /** @internal */
@@ -45,9 +45,7 @@ export class Tensor {
     readonly shape: Shape,
     /** @internal */ readonly node: TensorNode,
     readonly requiresGrad = false,
-  ) {
-    if (node.kind === "input") this.materialized = node.value;
-  }
+  ) {}
 
   grad?: Tensor;
 
@@ -192,69 +190,69 @@ export class Tensor {
     return binary(this, alpha, "prelu");
   }
 
-  matmul(other: Tensor, options: MatmulOptions = {}): Tensor {
-    return matmul(this, other, options);
+  matmul(_other: Tensor, _options: MatmulOptions = {}): Tensor {
+    return notYet("matmul");
   }
 
-  conv2d(filter: Tensor, options: Conv2DOptions = {}): Tensor {
-    return conv2d(this, filter, options);
+  conv2d(_filter: Tensor, _options: Conv2DOptions = {}): Tensor {
+    return notYet("conv2d");
   }
 
   conv2dGradients(
-    filter: Tensor,
-    outputGradient: Tensor,
-    options: Conv2DOptions = {},
+    _filter: Tensor,
+    _outputGradient: Tensor,
+    _options: Conv2DOptions = {},
   ): readonly [Tensor, Tensor] {
-    return conv2dGradients(this, filter, outputGradient, options);
+    return notYet("conv2dGradients");
   }
 
-  maxPool(options: Pool2DOptions): Tensor {
-    return pool2d(this, "maxPool", options);
+  maxPool(_options: Pool2DOptions): Tensor {
+    return notYet("maxPool");
   }
-  avgPool(options: Pool2DOptions): Tensor {
-    return pool2d(this, "avgPool", options);
+  avgPool(_options: Pool2DOptions): Tensor {
+    return notYet("avgPool");
   }
-  maxPoolGrad(outputGradient: Tensor, options: Pool2DOptions): Tensor {
-    return pool2dGrad(this, "maxPoolGrad", outputGradient, options);
+  maxPoolGrad(_outputGradient: Tensor, _options: Pool2DOptions): Tensor {
+    return notYet("maxPoolGrad");
   }
-  avgPoolGrad(outputGradient: Tensor, options: Pool2DOptions): Tensor {
-    return pool2dGrad(this, "avgPoolGrad", outputGradient, options);
+  avgPoolGrad(_outputGradient: Tensor, _options: Pool2DOptions): Tensor {
+    return notYet("avgPoolGrad");
   }
 
-  softmax(axis = -1): Tensor {
-    return softmax(this, "softmax", axis);
+  softmax(_axis = -1): Tensor {
+    return notYet("softmax");
   }
-  logSoftmax(axis = -1): Tensor {
-    return softmax(this, "logSoftmax", axis);
+  logSoftmax(_axis = -1): Tensor {
+    return notYet("logSoftmax");
   }
 
   softmaxCrossEntropyWithLogits(
-    labels: Tensor,
-    options: { readonly reduction?: "none" | "sum" | "mean" } = {},
+    _labels: Tensor,
+    _options: { readonly reduction?: "none" | "sum" | "mean" } = {},
   ): Tensor {
-    return softmaxCrossEntropyWithLogits(this, labels, options);
+    return notYet("softmaxCrossEntropyWithLogits");
   }
 
-  sum(axis?: number): Tensor {
-    return reduce(this, "sum", axis);
+  sum(_axis?: number): Tensor {
+    return notYet("sum");
   }
-  mean(axis?: number): Tensor {
-    return reduce(this, "mean", axis);
+  mean(_axis?: number): Tensor {
+    return notYet("mean");
   }
-  prod(axis?: number): Tensor {
-    return reduce(this, "prod", axis);
+  prod(_axis?: number): Tensor {
+    return notYet("prod");
   }
-  max(axis?: number): Tensor {
-    return reduce(this, "max", axis);
+  max(_axis?: number): Tensor {
+    return notYet("max");
   }
-  min(axis?: number): Tensor {
-    return reduce(this, "min", axis);
+  min(_axis?: number): Tensor {
+    return notYet("min");
   }
-  argMax(axis = 0): Tensor {
-    return reduce(this, "argMax", axis);
+  argMax(_axis = 0): Tensor {
+    return notYet("argMax");
   }
-  argMin(axis = 0): Tensor {
-    return reduce(this, "argMin", axis);
+  argMin(_axis = 0): Tensor {
+    return notYet("argMin");
   }
 
   async data(): Promise<Float32Array> {
@@ -280,7 +278,7 @@ export class Tensor {
     this.grad = undefined;
   }
 
-  /** @internal Update a parameter leaf and invalidate its resident GPU value. */
+  /** @internal Update a parameter leaf, and the resident array that holds its value. */
   async assign(values: ArrayLike<number>): Promise<void> {
     this.assertUsable();
     if (!this.requiresGrad || this.node.kind !== "input")
@@ -290,7 +288,7 @@ export class Tensor {
     if (values.length !== this.node.value.length)
       throw new RangeError("Parameter assignment must preserve tensor size.");
     this.node.value.set(values);
-    await this.device.invalidate(this);
+    this.storage?.write(this.node.value);
   }
 
   /** @internal Host view used by the initial optimizer implementation. */
@@ -304,16 +302,6 @@ export class Tensor {
     if (this.disposed) return;
     this.disposed = true;
     await this.device.release(this);
-  }
-
-  /** @internal */
-  setMaterialized(value: TensorStorage | undefined): void {
-    this.materialized = value;
-  }
-
-  /** @internal */
-  getMaterialized(): TensorStorage | undefined {
-    return this.materialized;
   }
 
   /** @internal */

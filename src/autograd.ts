@@ -1,8 +1,7 @@
 import { sameShape, sizeOf } from "./tensor/shape.js";
 import type { Tensor } from "./tensor/tensor.js";
-import { constantLike } from "./autograd/accumulate.js";
+import { addGradient, constantLike } from "./autograd/accumulate.js";
 import { topologicalOrder } from "./autograd/graph.js";
-import { applyGradientRule } from "./autograd/rules/index.js";
 
 /**
  * Build deferred reverse-mode gradients for the supported TypeNN Tensor graph
@@ -32,12 +31,15 @@ export function gradients(
 
     const node = value.node;
     if (node.kind === "input") continue;
-    applyGradientRule({
-      value,
-      node,
-      upstream: gradient,
-      gradients: accumulated,
-    });
+    if (!node.backward)
+      throw new Error(
+        `Autograd for TypeNN ${node.op} nodes is not implemented yet.`,
+      );
+    const contributions = node.backward(gradient, value);
+    for (const [index, input] of node.inputs.entries()) {
+      const contribution = contributions[index];
+      if (contribution) addGradient(accumulated, input, contribution);
+    }
   }
 
   return wrt.map(

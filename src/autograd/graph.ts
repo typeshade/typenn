@@ -1,52 +1,41 @@
-import type { TensorNode } from "../tensor/node.js";
 import type { Tensor } from "../tensor/tensor.js";
 
-type NodeKind = TensorNode["kind"];
-type Node<K extends NodeKind> = Extract<TensorNode, { kind: K }>;
-type ParentSelectorMap = {
-  [K in NodeKind]: (node: Node<K>) => readonly Tensor[];
-};
-
-const NODE_PARENTS: ParentSelectorMap = {
-  input: () => [],
-  relu: ({ input }) => [input],
-  reluGrad: ({ input, dy }) => [input, dy],
-  unary: ({ input }) => [input],
-  special: ({ input }) => [input],
-  binary: ({ a, b }) => [a, b],
-  binaryGrad: ({ a, b, dy }) => [a, b, dy],
-  softmax: ({ input }) => [input],
-  softmaxGrad: ({ value, dy }) => [value, dy],
-  matmul: ({ a, b }) => [a, b],
-  conv2d: ({ input, filter }) => [input, filter],
-  pool2d: ({ input }) => [input],
-  conv2dGrad: ({ input, filter, dy }) => [input, filter, dy],
-  pool2dGrad: ({ input, dy }) => [input, dy],
-  reduceGrad: ({ input, dy }) => [input, dy],
-  softmaxCrossEntropyGrad: ({ logits, labels, dy }) => [logits, labels, dy],
-  reduce: ({ input }) => [input],
-  softmaxCrossEntropy: ({ logits, labels }) => [logits, labels],
-  reshape: ({ input }) => [input],
-};
-
-function parents(node: TensorNode): readonly Tensor[] {
-  const selector = NODE_PARENTS[node.kind] as (
-    node: TensorNode,
-  ) => readonly Tensor[];
-  return selector(node);
+/** The tensors a tensor is computed from: the inputs of its kernel call. */
+function parents(tensor: Tensor): readonly Tensor[] {
+  return tensor.node.kind === "op" ? tensor.node.inputs : [];
 }
 
-export function topologicalOrder(output: Tensor): Tensor[] {
+/**
+ * The tensors `output` is computed from, each after the tensors it reads and `output` last.
+ * A tensor for which `stop` is true ends the walk: it is not in the list, and nor is anything
+ * only it reads. The walk is iterative, so a deep graph does not exhaust the call stack.
+ */
+export function postOrder(
+  output: Tensor,
+  stop: (tensor: Tensor) => boolean = () => false,
+): Tensor[] {
   const order: Tensor[] = [];
-  const visited = new Set<Tensor>();
-
-  function visit(tensor: Tensor): void {
-    if (visited.has(tensor)) return;
-    visited.add(tensor);
-    for (const parent of parents(tensor.node)) visit(parent);
-    order.push(tensor);
+  const seen = new Map<Tensor, "open" | "done">();
+  const stack: Tensor[] = [output];
+  while (stack.length > 0) {
+    const tensor = stack[stack.length - 1]!;
+    const state = seen.get(tensor);
+    if (state === "open") order.push(tensor);
+    if (state !== undefined || stop(tensor)) {
+      seen.set(tensor, "done");
+      stack.pop();
+      continue;
+    }
+    seen.set(tensor, "open");
+    // Pushed last first, so that the first input is walked first.
+    const inputs = parents(tensor);
+    for (let index = inputs.length - 1; index >= 0; index--)
+      if (!seen.has(inputs[index]!)) stack.push(inputs[index]!);
   }
+  return order;
+}
 
-  visit(output);
-  return order.reverse();
+/** The tensors `output` is computed from, `output` first and each before the tensors it reads. */
+export function topologicalOrder(output: Tensor): Tensor[] {
+  return postOrder(output).reverse();
 }
