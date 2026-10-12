@@ -480,3 +480,73 @@ export function matmulGradReference(
       }
   return [Float32Array.from(da), Float32Array.from(db)];
 }
+
+// ─── softmax and cross entropy ────────────────────────────────────────────────────────────────
+
+/** The softmax, or the log softmax, of `x` over `axis`, in double precision. */
+export function softmaxReference(x, shape, axis, log = false) {
+  const { outer, axisSize, inner } = axisLayout(shape, axis);
+  const out = new Float32Array(x.length);
+  for (let o = 0; o < outer; o++)
+    for (let n = 0; n < inner; n++) {
+      const at = (k) => (o * axisSize + k) * inner + n;
+      let peak = -Infinity;
+      for (let k = 0; k < axisSize; k++) peak = Math.max(peak, x[at(k)]);
+      let sum = 0;
+      for (let k = 0; k < axisSize; k++) sum += Math.exp(x[at(k)] - peak);
+      for (let k = 0; k < axisSize; k++)
+        out[at(k)] = log
+          ? x[at(k)] - peak - Math.log(sum)
+          : Math.exp(x[at(k)] - peak) / sum;
+    }
+  return out;
+}
+
+/** The gradient of a softmax or a log softmax from its output `y` and the gradient `dy` of it. */
+export function softmaxGradReference(y, dy, shape, axis, log = false) {
+  const { outer, axisSize, inner } = axisLayout(shape, axis);
+  const out = new Float32Array(y.length);
+  for (let o = 0; o < outer; o++)
+    for (let n = 0; n < inner; n++) {
+      const at = (k) => (o * axisSize + k) * inner + n;
+      let reduction = 0;
+      for (let k = 0; k < axisSize; k++)
+        reduction += log ? dy[at(k)] : dy[at(k)] * y[at(k)];
+      for (let k = 0; k < axisSize; k++)
+        out[at(k)] = log
+          ? dy[at(k)] - Math.exp(y[at(k)]) * reduction
+          : y[at(k)] * (dy[at(k)] - reduction);
+    }
+  return out;
+}
+
+/** The loss of each row of `logits` [rows, columns] against `labels` of the same shape, and the
+ *  gradients of the loss with respect to both, from the gradient `dy` of each row's loss. */
+export function crossEntropyReference(logits, labels, rows, columns, dy) {
+  const losses = new Float32Array(rows);
+  const gradientLogits = new Float32Array(logits.length);
+  const gradientLabels = new Float32Array(logits.length);
+  for (let row = 0; row < rows; row++) {
+    const at = (c) => row * columns + c;
+    let peak = -Infinity;
+    for (let c = 0; c < columns; c++) peak = Math.max(peak, logits[at(c)]);
+    let sum = 0;
+    let labelSum = 0;
+    let labelLogit = 0;
+    for (let c = 0; c < columns; c++) {
+      sum += Math.exp(logits[at(c)] - peak);
+      labelSum += labels[at(c)];
+      labelLogit += labels[at(c)] * logits[at(c)];
+    }
+    const logSumExp = peak + Math.log(sum);
+    losses[row] = labelSum * logSumExp - labelLogit;
+    if (dy)
+      for (let c = 0; c < columns; c++) {
+        gradientLogits[at(c)] =
+          (Math.exp(logits[at(c)] - logSumExp) * labelSum - labels[at(c)]) *
+          dy[row];
+        gradientLabels[at(c)] = (logSumExp - logits[at(c)]) * dy[row];
+      }
+  }
+  return { losses, gradientLogits, gradientLabels };
+}

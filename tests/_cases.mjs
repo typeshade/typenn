@@ -16,6 +16,7 @@ import {
   binaryGradReference,
   binaryReference,
   broadcastShape,
+  crossEntropyReference,
   f32,
   matmulGradReference,
   matmulReference,
@@ -23,6 +24,8 @@ import {
   reduceGradReference,
   reduceReference,
   sizeOf,
+  softmaxGradReference,
+  softmaxReference,
   values,
 } from "./_reference.mjs";
 
@@ -582,4 +585,168 @@ export function reductionAndMatmulCases() {
     ...matmulCases(),
     ...layerCases(),
   ];
+}
+
+// ─── softmax and cross entropy ────────────────────────────────────────────────────────────────
+
+const SOFTMAX_AXES = [
+  [[5], -1],
+  [[3, 4], 0],
+  [[3, 4], 1],
+  [[3, 4], -1],
+  [[2, 3, 4], 0],
+  [[2, 3, 4], 1],
+  [[2, 3, 4], 2],
+];
+
+/** @returns {Case[]} */
+function softmaxCases() {
+  const cases = [];
+  for (const [name, log] of [
+    ["softmax", false],
+    ["logSoftmax", true],
+  ]) {
+    for (const [shape, axis] of SOFTMAX_AXES) {
+      const x = values(nextSeed(), sizeOf(shape), -4, 4);
+      const dy = values(nextSeed(), sizeOf(shape), -2, 2);
+      const label = `shape [${shape}], axis ${axis}`;
+      cases.push({
+        name: `${name}, ${label}`,
+        tolerance: 1e-5,
+        gpuTolerance: 1e-5,
+        run: async (_nn, device) => ({
+          actual: await device.tensor(x, { shape })[name](axis).data(),
+          expected: softmaxReference(x, shape, axis, log),
+        }),
+      });
+      cases.push({
+        name: `gradient of ${name}, ${label}`,
+        tolerance: 1e-5,
+        gpuTolerance: 1e-5,
+        run: async (nn, device) => {
+          const input = device.tensor(x, { shape });
+          const [gradient] = nn.gradients(
+            input[name](axis),
+            [input],
+            device.tensor(dy, { shape }),
+          );
+          return {
+            actual: await gradient.data(),
+            expected: softmaxGradReference(
+              softmaxReference(x, shape, axis, log),
+              dy,
+              shape,
+              axis,
+              log,
+            ),
+          };
+        },
+      });
+    }
+  }
+  // A large logit must not overflow.
+  cases.push({
+    name: "softmax of large logits",
+    tolerance: 1e-5,
+    gpuTolerance: 1e-5,
+    run: async (_nn, device) => ({
+      actual: await device
+        .tensor([1000, 1001, 999, -1000], { shape: [4] })
+        .softmax()
+        .data(),
+      expected: softmaxReference([1000, 1001, 999, -1000], [4], 0),
+    }),
+  });
+  return cases;
+}
+
+/** @returns {Case[]} */
+function lossCases() {
+  const cases = [];
+  const [rows, columns] = [6, 5];
+  const logits = values(nextSeed(), rows * columns, -3, 3);
+  // Rows of a one-hot label, of a distribution, and of a weight other than 1.
+  const labels = new Float32Array(rows * columns);
+  [0, 3, 4, 1, 2, 0].forEach(
+    (label, row) => (labels[row * columns + label] = 1),
+  );
+  labels.set([0.2, 0.3, 0.1, 0.25, 0.15], 1 * columns);
+  labels.set([0, 0, 2, 0, 0], 5 * columns);
+  const dy = values(nextSeed(), rows, -2, 2);
+  const expected = crossEntropyReference(logits, labels, rows, columns, dy);
+  const loss = (device, options) =>
+    device
+      .tensor(logits, { shape: [rows, columns] })
+      .softmaxCrossEntropyWithLogits(
+        device.tensor(labels, { shape: [rows, columns] }),
+        options,
+      );
+  cases.push({
+    name: "softmax cross entropy of each row",
+    tolerance: 1e-5,
+    gpuTolerance: 1e-5,
+    run: async (_nn, device) => ({
+      actual: await loss(device).data(),
+      expected: expected.losses,
+    }),
+  });
+  for (const reduction of ["sum", "mean"])
+    cases.push({
+      name: `softmax cross entropy, ${reduction}`,
+      tolerance: 1e-5,
+      gpuTolerance: 1e-5,
+      run: async (_nn, device) => {
+        const total = expected.losses.reduce((p, q) => p + q, 0);
+        return {
+          actual: await loss(device, { reduction }).data(),
+          expected: [reduction === "sum" ? total : total / rows],
+        };
+      },
+    });
+  for (const [target, gradient] of [
+    ["logits", expected.gradientLogits],
+    ["labels", expected.gradientLabels],
+  ])
+    cases.push({
+      name: `gradient of softmax cross entropy with respect to the ${target}`,
+      tolerance: 1e-5,
+      gpuTolerance: 1e-5,
+      run: async (nn, device) => {
+        const x = device.tensor(logits, { shape: [rows, columns] });
+        const y = device.tensor(labels, { shape: [rows, columns] });
+        const out = x.softmaxCrossEntropyWithLogits(y);
+        const [actual] = nn.gradients(
+          out,
+          [target === "logits" ? x : y],
+          device.tensor(dy, { shape: [rows] }),
+        );
+        return { actual: await actual.data(), expected: gradient };
+      },
+    });
+  // The loss of a mean over the rows: the gradient with respect to the logits is the mean of them.
+  cases.push({
+    name: "gradient of the mean softmax cross entropy",
+    tolerance: 1e-5,
+    gpuTolerance: 1e-5,
+    run: async (nn, device) => {
+      const x = device.tensor(logits, { shape: [rows, columns] });
+      const out = x.softmaxCrossEntropyWithLogits(
+        device.tensor(labels, { shape: [rows, columns] }),
+        { reduction: "mean" },
+      );
+      const [actual] = nn.gradients(out, [x]);
+      const ones = new Float32Array(rows).fill(1 / rows);
+      return {
+        actual: await actual.data(),
+        expected: crossEntropyReference(logits, labels, rows, columns, ones)
+          .gradientLogits,
+      };
+    },
+  });
+  return cases;
+}
+
+export function softmaxAndLossCases() {
+  seed = 3000;
+  return [...softmaxCases(), ...lossCases()];
 }

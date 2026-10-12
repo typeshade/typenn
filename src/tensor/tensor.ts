@@ -15,6 +15,8 @@ import {
   unary,
 } from "./operations/elementwise.js";
 import { matmul, type MatmulOptions } from "./operations/linear-algebra.js";
+import { softmaxCrossEntropyWithLogits } from "./operations/loss.js";
+import { softmax } from "./operations/normalization.js";
 import { reduce } from "./operations/reductions.js";
 import { reshape } from "./operations/shape.js";
 import type { Conv2DOptions, Pool2DOptions } from "./spatial.js";
@@ -216,18 +218,18 @@ export class Tensor {
     return notYet("avgPoolGrad");
   }
 
-  softmax(_axis = -1): Tensor {
-    return notYet("softmax");
+  softmax(axis = -1): Tensor {
+    return softmax(this, "softmax", axis);
   }
-  logSoftmax(_axis = -1): Tensor {
-    return notYet("logSoftmax");
+  logSoftmax(axis = -1): Tensor {
+    return softmax(this, "logSoftmax", axis);
   }
 
   softmaxCrossEntropyWithLogits(
-    _labels: Tensor,
-    _options: { readonly reduction?: "none" | "sum" | "mean" } = {},
+    labels: Tensor,
+    options: { readonly reduction?: "none" | "sum" | "mean" } = {},
   ): Tensor {
-    return notYet("softmaxCrossEntropyWithLogits");
+    return softmaxCrossEntropyWithLogits(this, labels, options);
   }
 
   sum(axis?: number): Tensor {

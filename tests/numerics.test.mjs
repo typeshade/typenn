@@ -1,6 +1,10 @@
 import test, { after, before } from "node:test";
 import assert from "node:assert/strict";
-import { elementwiseCases, reductionAndMatmulCases } from "./_cases.mjs";
+import {
+  elementwiseCases,
+  reductionAndMatmulCases,
+  softmaxAndLossCases,
+} from "./_cases.mjs";
 import { closeNn, loadNn } from "./_nn.mjs";
 import { difference } from "./_reference.mjs";
 
@@ -18,7 +22,11 @@ after(async () => {
   await closeNn();
 });
 
-for (const testCase of [...elementwiseCases(), ...reductionAndMatmulCases()]) {
+for (const testCase of [
+  ...elementwiseCases(),
+  ...reductionAndMatmulCases(),
+  ...softmaxAndLossCases(),
+]) {
   if (testCase.cpuOnly && process.env.TYPENN_FAST) continue;
   test(testCase.name, async () => {
     const { actual, expected } = await testCase.run(nn, device);

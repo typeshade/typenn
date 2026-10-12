@@ -1,45 +1,82 @@
 "use typeshade";
 
-class Shape {
-  outer: u32;
-  axisSize: u32;
-  inner: u32;
+// Softmax over one axis of an input read as [outer, axisSize, inner]. One invocation for each
+// element of the output, so each one finds the greatest element and the sum of exponentials of its
+// slice again. A slice has `axisSize` elements, and the work for a slice is `axisSize` times
+// `axisSize`: the kernel is made for the short axes of a classifier.
+
+export function softmax(
+  out: array<f32>,
+  x: array<f32>,
+  axisSize: u32,
+  inner: u32,
+): void {
+  for (let i: u32 = 0; i < out.length; i++) {
+    const base = (i / (axisSize * inner)) * axisSize * inner + (i % inner);
+    let peak: f32 = x[base];
+    for (let k: u32 = 1; k < axisSize; k++) {
+      peak = max(peak, x[base + k * inner]);
+    }
+    let total: f32 = 0.0;
+    for (let k: u32 = 0; k < axisSize; k++) {
+      total += exp(x[base + k * inner] - peak);
+    }
+    out[i] = exp(x[i] - peak) / total;
+  }
 }
 
-declare const shape: uniform<Shape>;
-
-declare const input: storage<array<f32>>;
-
-declare const output: storage<array<f32>, "read_write">;
-
-@compute([64])
-export function softmaxKernel(@builtin("global_invocation_id") gid: vec3u) {
-  let slice: u32 = gid.x;
-  let sliceCount: u32 = shape.outer * shape.inner;
-  if (slice >= sliceCount) {
-    return;
+export function logSoftmax(
+  out: array<f32>,
+  x: array<f32>,
+  axisSize: u32,
+  inner: u32,
+): void {
+  for (let i: u32 = 0; i < out.length; i++) {
+    const base = (i / (axisSize * inner)) * axisSize * inner + (i % inner);
+    let peak: f32 = x[base];
+    for (let k: u32 = 1; k < axisSize; k++) {
+      peak = max(peak, x[base + k * inner]);
+    }
+    let total: f32 = 0.0;
+    for (let k: u32 = 0; k < axisSize; k++) {
+      total += exp(x[base + k * inner] - peak);
+    }
+    out[i] = x[i] - (peak + log(total));
   }
-  let outerIndex: u32 = slice / shape.inner;
-  let innerIndex: u32 = slice % shape.inner;
-  let base: u32 = outerIndex * shape.axisSize * shape.inner + innerIndex;
-  let peak: f32 = input[base];
-  for (let index: u32 = 1; index < shape.axisSize; index = index + 1) {
-    peak = max(peak, input[base + index * shape.inner]);
+}
+
+/** The gradient of `softmax` from `value`, its output, and `dy`, the gradient of that output. */
+export function softmaxGrad(
+  out: array<f32>,
+  value: array<f32>,
+  dy: array<f32>,
+  axisSize: u32,
+  inner: u32,
+): void {
+  for (let i: u32 = 0; i < out.length; i++) {
+    const base = (i / (axisSize * inner)) * axisSize * inner + (i % inner);
+    let reduction: f32 = 0.0;
+    for (let k: u32 = 0; k < axisSize; k++) {
+      reduction += dy[base + k * inner] * value[base + k * inner];
+    }
+    out[i] = value[i] * (dy[i] - reduction);
   }
-  let total: f32 = 0.0;
-  for (
-    let reduceIndex: u32 = 0;
-    reduceIndex < shape.axisSize;
-    reduceIndex = reduceIndex + 1
-  ) {
-    total += exp(input[base + reduceIndex * shape.inner] - peak);
-  }
-  for (
-    let outputIndex: u32 = 0;
-    outputIndex < shape.axisSize;
-    outputIndex = outputIndex + 1
-  ) {
-    let offset: u32 = base + outputIndex * shape.inner;
-    output[offset] = exp(input[offset] - peak) / total;
+}
+
+/** The gradient of `logSoftmax` from `value`, its output, and `dy`. */
+export function logSoftmaxGrad(
+  out: array<f32>,
+  value: array<f32>,
+  dy: array<f32>,
+  axisSize: u32,
+  inner: u32,
+): void {
+  for (let i: u32 = 0; i < out.length; i++) {
+    const base = (i / (axisSize * inner)) * axisSize * inner + (i % inner);
+    let reduction: f32 = 0.0;
+    for (let k: u32 = 0; k < axisSize; k++) {
+      reduction += dy[base + k * inner];
+    }
+    out[i] = dy[i] - exp(value[i]) * reduction;
   }
 }
