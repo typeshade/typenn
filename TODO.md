@@ -4,9 +4,8 @@
 
 Public function names are intended to match TensorFlow.js so users can map familiar
 operations directly: `tf.add(a, b)` becomes `nn.add(a, b)`. These are tensor
-operations, not composite layers such as `Dense` or `Conv2D`. A TypeNN operation may
-be implemented by one or more TypeShade kernels depending on broadcasting, shape,
-and backend constraints.
+operations, not composite layers such as `Dense` or `Conv2D`. A TypeNN operation is
+one or more TypeShade kernel functions, chosen by broadcasting and shape.
 
 | Priority | TensorFlow.js operation                               | TypeNN API                                         | Status                                                                                  |
 | -------- | ----------------------------------------------------- | -------------------------------------------------- | --------------------------------------------------------------------------------------- |
@@ -60,107 +59,107 @@ utilities must be distinguished from public `tf.*` operations before assigning A
 parity. The entries below extend the public-operation backlog and are not implemented
 unless already present in the table above.
 
-| Priority | TensorFlow.js operation                                      | Planned TypeNN API                                           | Status                                                                                                       |
-| -------- | ------------------------------------------------------------ | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
-| P1       | `tf.conv2d(x, filter, ...)`                                  | `nn.conv2d(x, filter, ...)`                                  | Partial: NHWC/HWIO forward plus explicit input/filter gradients; no graph autodiff, bias/dilation/groups yet |
-| P1       | `tf.depthwiseConv2d(x, filter, ...)`                         | `nn.depthwiseConv2d(x, filter, ...)`                         | TODO                                                                                                         |
-| P1       | `tf.maxPool(x, ...)`                                         | `nn.maxPool(x, ...)`                                         | Partial: NHWC 2D pooling and explicit input gradient; first maximum wins ties; no graph autodiff             |
-| P1       | `tf.avgPool(x, ...)`                                         | `nn.avgPool(x, ...)`                                         | Partial: NHWC 2D pooling and explicit input gradient; excludes padded cells from average; no graph autodiff  |
-| P1       | `tf.softplus(x)`                                             | `nn.softplus(x)`                                             | Implemented: numerically stable formula                                                                      |
-| P1       | `tf.relu6(x)`                                                | `nn.relu6(x)`                                                | Implemented                                                                                                  |
-| P1       | `tf.prelu(x, alpha)`                                         | `nn.prelu(x, alpha)`                                         | Implemented with broadcasting                                                                                |
-| P1       | `tf.addN(tensors)`                                           | `nn.addN(tensors)`                                           | Implemented as a graph of pairwise adds                                                                      |
-| P1       | `tf.squaredDifference(a, b)`                                 | `nn.squaredDifference(a, b)`                                 | Implemented as `square(sub(a, b))`                                                                           |
-| P1       | `tf.prod(x, axis)`                                           | `nn.prod(x, axis)`                                           | Implemented                                                                                                  |
-| P1       | `tf.all(x, axis)`                                            | `nn.all(x, axis)`                                            | TODO                                                                                                         |
-| P1       | `tf.any(x, axis)`                                            | `nn.any(x, axis)`                                            | TODO                                                                                                         |
-| P2       | `tf.acos(x)`                                                 | `nn.acos(x)`                                                 | Implemented with TypeShade builtin; CPU/WebGPU; Tensor-graph gradient                                        |
-| P2       | `tf.acosh(x)`                                                | `nn.acosh(x)`                                                | Implemented with TypeShade builtin; CPU/WebGPU; Tensor-graph gradient                                        |
-| P2       | `tf.asin(x)`                                                 | `nn.asin(x)`                                                 | Implemented with TypeShade builtin; CPU/WebGPU; Tensor-graph gradient                                        |
-| P2       | `tf.asinh(x)`                                                | `nn.asinh(x)`                                                | Implemented with TypeShade builtin; CPU/WebGPU; Tensor-graph gradient                                        |
-| P2       | `tf.atan(x)`                                                 | `nn.atan(x)`                                                 | Implemented with TypeShade builtin; CPU/WebGPU; Tensor-graph gradient                                        |
-| P2       | `tf.atan2(a, b)`                                             | `nn.atan2(a, b)`                                             | TODO                                                                                                         |
-| P2       | `tf.atanh(x)`                                                | `nn.atanh(x)`                                                | Implemented with TypeShade builtin; CPU/WebGPU; Tensor-graph gradient                                        |
-| P2       | `tf.ceil(x)`                                                 | `nn.ceil(x)`                                                 | Implemented                                                                                                  |
-| P2       | `tf.cos(x)`                                                  | `nn.cos(x)`                                                  | Implemented                                                                                                  |
-| P2       | `tf.cosh(x)`                                                 | `nn.cosh(x)`                                                 | Implemented                                                                                                  |
-| P2       | `tf.erf(x)`                                                  | `nn.erf(x)`                                                  | TODO                                                                                                         |
-| P2       | `tf.expm1(x)`                                                | `nn.expm1(x)`                                                | Implemented with a small-input series                                                                        |
-| P2       | `tf.floor(x)`                                                | `nn.floor(x)`                                                | Implemented                                                                                                  |
-| P2       | `tf.floorDiv(a, b)`                                          | `nn.floorDiv(a, b)`                                          | TODO                                                                                                         |
-| P2       | `tf.log1p(x)`                                                | `nn.log1p(x)`                                                | Implemented with a small-input series                                                                        |
-| P2       | `tf.mod(a, b)`                                               | `nn.mod(a, b)`                                               | TODO                                                                                                         |
-| P2       | `tf.notEqual(a, b)`                                          | `nn.notEqual(a, b)`                                          | TODO                                                                                                         |
-| P2       | `tf.greaterEqual(a, b)`                                      | `nn.greaterEqual(a, b)`                                      | TODO                                                                                                         |
-| P2       | `tf.lessEqual(a, b)`                                         | `nn.lessEqual(a, b)`                                         | TODO                                                                                                         |
-| P2       | `tf.reciprocal(x)`                                           | `nn.reciprocal(x)`                                           | Implemented                                                                                                  |
-| P2       | `tf.round(x)`                                                | `nn.round(x)`                                                | Implemented                                                                                                  |
-| P2       | `tf.rsqrt(x)`                                                | `nn.rsqrt(x)`                                                | Implemented                                                                                                  |
-| P2       | `tf.sign(x)`                                                 | `nn.sign(x)`                                                 | Implemented                                                                                                  |
-| P2       | `tf.sin(x)`                                                  | `nn.sin(x)`                                                  | Implemented                                                                                                  |
-| P2       | `tf.sinh(x)`                                                 | `nn.sinh(x)`                                                 | Implemented                                                                                                  |
-| P2       | `tf.step(x)`                                                 | `nn.step(x)`                                                 | Implemented as 0 for negative inputs, 1 otherwise; zero Tensor-graph gradient                                |
-| P2       | `tf.tan(x)`                                                  | `nn.tan(x)`                                                  | Implemented with sin/cos                                                                                     |
-| P2       | `tf.expandDims(x, axis)`                                     | `nn.expandDims(x, axis)`                                     | TODO                                                                                                         |
-| P2       | `tf.reverse(x, axis)`                                        | `nn.reverse(x, axis)`                                        | TODO                                                                                                         |
-| P2       | `tf.slice(x, begin, size)`                                   | `nn.slice(x, begin, size)`                                   | TODO                                                                                                         |
-| P2       | `tf.stridedSlice(x, ...)`                                    | `nn.stridedSlice(x, ...)`                                    | TODO                                                                                                         |
-| P2       | `tf.tile(x, reps)`                                           | `nn.tile(x, reps)`                                           | TODO                                                                                                         |
-| P2       | `tf.gatherND(x, indices)`                                    | `nn.gatherND(x, indices)`                                    | TODO                                                                                                         |
-| P2       | `tf.pack(tensors, axis)`                                     | `nn.pack(tensors, axis)`                                     | TODO                                                                                                         |
-| P2       | `tf.unstack(x, axis)`                                        | `nn.unstack(x, axis)`                                        | TODO                                                                                                         |
-| P2       | `tf.diag(x)`                                                 | `nn.diag(x)`                                                 | TODO                                                                                                         |
-| P2       | `tf.mirrorPad(x, paddings, mode)`                            | `nn.mirrorPad(x, paddings, mode)`                            | TODO                                                                                                         |
-| P2       | `tf.spaceToBatchND(x, blockShape, paddings)`                 | `nn.spaceToBatchND(x, blockShape, paddings)`                 | TODO                                                                                                         |
-| P2       | `tf.batchToSpaceND(x, blockShape, crops)`                    | `nn.batchToSpaceND(x, blockShape, crops)`                    | TODO                                                                                                         |
-| P2       | `tf.cast(x, dtype)`                                          | `nn.cast(x, dtype)`                                          | TODO                                                                                                         |
-| P2       | `tf.fill(shape, value)`                                      | `nn.fill(shape, value)`                                      | TODO                                                                                                         |
-| P2       | `tf.onesLike(x)`                                             | `nn.onesLike(x)`                                             | TODO                                                                                                         |
-| P2       | `tf.zerosLike(x)`                                            | `nn.zerosLike(x)`                                            | TODO                                                                                                         |
-| P2       | `tf.oneHot(indices, depth)`                                  | `nn.oneHot(indices, depth)`                                  | TODO                                                                                                         |
-| P2       | `tf.range(start, stop, step)`                                | `nn.range(start, stop, step)`                                | TODO                                                                                                         |
-| P2       | `tf.linspace(start, stop, num)`                              | `nn.linspace(start, stop, num)`                              | TODO                                                                                                         |
-| P2       | `tf.scatterND(indices, updates, shape)`                      | `nn.scatterND(indices, updates, shape)`                      | TODO                                                                                                         |
-| P2       | `tf.tensorScatterUpdate(x, indices, updates)`                | `nn.tensorScatterUpdate(x, indices, updates)`                | TODO                                                                                                         |
-| P2       | `tf.topk(x, k)`                                              | `nn.topk(x, k)`                                              | TODO                                                                                                         |
-| P2       | `tf.searchSorted(sorted, values)`                            | `nn.searchSorted(sorted, values)`                            | TODO                                                                                                         |
-| P2       | `tf.sparseSegmentSum(data, indices, segmentIds)`             | `nn.sparseSegmentSum(data, indices, segmentIds)`             | TODO                                                                                                         |
-| P2       | `tf.sparseSegmentMean(data, indices, segmentIds)`            | `nn.sparseSegmentMean(data, indices, segmentIds)`            | TODO                                                                                                         |
-| P3       | `tf.conv3d(x, filter, ...)`                                  | `nn.conv3d(x, filter, ...)`                                  | TODO                                                                                                         |
-| P3       | `tf.avgPool3d(x, ...)`                                       | `nn.avgPool3d(x, ...)`                                       | TODO                                                                                                         |
-| P3       | `tf.maxPool3d(x, ...)`                                       | `nn.maxPool3d(x, ...)`                                       | TODO                                                                                                         |
-| P3       | `tf.cropAndResize(image, boxes, boxIndex, cropSize)`         | `nn.cropAndResize(image, boxes, boxIndex, cropSize)`         | TODO                                                                                                         |
-| P3       | `tf.image.resizeBilinear(x, size)`                           | `nn.image.resizeBilinear(x, size)`                           | TODO                                                                                                         |
-| P3       | `tf.image.resizeNearestNeighbor(x, size)`                    | `nn.image.resizeNearestNeighbor(x, size)`                    | TODO                                                                                                         |
-| P3       | `tf.image.flipLeftRight(x)`                                  | `nn.image.flipLeftRight(x)`                                  | TODO                                                                                                         |
-| P3       | `tf.image.rotateWithOffset(x, radians, fillValue)`           | `nn.image.rotateWithOffset(x, radians, fillValue)`           | TODO                                                                                                         |
-| P3       | `tf.complex(real, imag)`                                     | `nn.complex(real, imag)`                                     | TODO                                                                                                         |
-| P3       | `tf.spectral.fft(x)`                                         | `nn.fft(x)`                                                  | TODO                                                                                                         |
-| P3       | `tf.spectral.ifft(x)`                                        | `nn.ifft(x)`                                                 | TODO                                                                                                         |
-| P3       | `tf.multinomial(logits, numSamples)`                         | `nn.multinomial(logits, numSamples)`                         | TODO                                                                                                         |
-| P3       | `tf.image.nonMaxSuppression(boxes, scores, maxOutputSize)`   | `nn.image.nonMaxSuppression(boxes, scores, maxOutputSize)`   | TODO                                                                                                         |
-| P3       | `tf.string.ngrams(...)`                                      | `nn.string.ngrams(...)`                                      | TODO                                                                                                         |
-| P2       | `tf.argMin(x, axis)`                                         | `nn.argMin(x, axis)`                                         | Implemented; indices are represented as float32 tensors                                                      |
-| P2       | `tf.cumsum(x, axis)`                                         | `nn.cumsum(x, axis)`                                         | TODO                                                                                                         |
-| P2       | `tf.cumprod(x, axis)`                                        | `nn.cumprod(x, axis)`                                        | TODO                                                                                                         |
-| P2       | `tf.logicalAnd(a, b)`                                        | `nn.logicalAnd(a, b)`                                        | TODO                                                                                                         |
-| P2       | `tf.logicalOr(a, b)`                                         | `nn.logicalOr(a, b)`                                         | TODO                                                                                                         |
-| P2       | `tf.logicalNot(x)`                                           | `nn.logicalNot(x)`                                           | TODO                                                                                                         |
-| P2       | `tf.isFinite(x)`                                             | `nn.isFinite(x)`                                             | TODO                                                                                                         |
-| P2       | `tf.isInf(x)`                                                | `nn.isInf(x)`                                                | TODO                                                                                                         |
-| P2       | `tf.isNaN(x)`                                                | `nn.isNaN(x)`                                                | TODO                                                                                                         |
-| P2       | `tf.depthToSpace(x, blockSize)`                              | `nn.depthToSpace(x, blockSize)`                              | TODO                                                                                                         |
-| P2       | `tf.dilation2d(x, filter, ...)`                              | `nn.dilation2d(x, filter, ...)`                              | TODO                                                                                                         |
-| P2       | `tf.einsum(equation, tensors)`                               | `nn.einsum(equation, tensors)`                               | TODO                                                                                                         |
-| P2       | `tf.unsortedSegmentSum(x, segmentIds, numSegments)`          | `nn.unsortedSegmentSum(x, segmentIds, numSegments)`          | TODO                                                                                                         |
-| P2       | `tf.sparseToDense(sparseIndices, outputShape, sparseValues)` | `nn.sparseToDense(sparseIndices, outputShape, sparseValues)` | TODO                                                                                                         |
-| P2       | `tf.bincount(x, weights, size)`                              | `nn.bincount(x, weights, size)`                              | TODO                                                                                                         |
-| P2       | `tf.denseBincount(x, weights, size)`                         | `nn.denseBincount(x, weights, size)`                         | TODO                                                                                                         |
-| P2       | `tf.real(x)`                                                 | `nn.real(x)`                                                 | TODO                                                                                                         |
-| P2       | `tf.imag(x)`                                                 | `nn.imag(x)`                                                 | TODO                                                                                                         |
-| P2       | `tf.abs(x)` for complex tensors                              | `nn.abs(x)` for complex tensors                              | Dtype expansion TODO; f32 implemented above                                                                  |
-| P3       | `tf.maxPoolWithArgmax(x, ...)`                               | `nn.maxPoolWithArgmax(x, ...)`                               | TODO                                                                                                         |
-| P3       | `tf.browser.fromPixels(pixels)`                              | `nn.image.fromPixels(pixels)`                                | TODO                                                                                                         |
+| Priority | TensorFlow.js operation                                      | Planned TypeNN API                                           | Status                                                                                                      |
+| -------- | ------------------------------------------------------------ | ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------- |
+| P1       | `tf.conv2d(x, filter, ...)`                                  | `nn.conv2d(x, filter, ...)`                                  | Partial: NHWC/HWIO forward, explicit input/filter gradients and graph autodiff; no bias/dilation/groups yet |
+| P1       | `tf.depthwiseConv2d(x, filter, ...)`                         | `nn.depthwiseConv2d(x, filter, ...)`                         | TODO                                                                                                        |
+| P1       | `tf.maxPool(x, ...)`                                         | `nn.maxPool(x, ...)`                                         | Partial: NHWC 2D pooling, explicit input gradient and graph autodiff; first maximum wins ties               |
+| P1       | `tf.avgPool(x, ...)`                                         | `nn.avgPool(x, ...)`                                         | Partial: NHWC 2D pooling, explicit input gradient and graph autodiff; excludes padded cells from average    |
+| P1       | `tf.softplus(x)`                                             | `nn.softplus(x)`                                             | Implemented: numerically stable formula                                                                     |
+| P1       | `tf.relu6(x)`                                                | `nn.relu6(x)`                                                | Implemented                                                                                                 |
+| P1       | `tf.prelu(x, alpha)`                                         | `nn.prelu(x, alpha)`                                         | Implemented with broadcasting                                                                               |
+| P1       | `tf.addN(tensors)`                                           | `nn.addN(tensors)`                                           | Implemented as a graph of pairwise adds                                                                     |
+| P1       | `tf.squaredDifference(a, b)`                                 | `nn.squaredDifference(a, b)`                                 | Implemented as `square(sub(a, b))`                                                                          |
+| P1       | `tf.prod(x, axis)`                                           | `nn.prod(x, axis)`                                           | Implemented                                                                                                 |
+| P1       | `tf.all(x, axis)`                                            | `nn.all(x, axis)`                                            | TODO                                                                                                        |
+| P1       | `tf.any(x, axis)`                                            | `nn.any(x, axis)`                                            | TODO                                                                                                        |
+| P2       | `tf.acos(x)`                                                 | `nn.acos(x)`                                                 | Implemented with TypeShade builtin; CPU/WebGPU; Tensor-graph gradient                                       |
+| P2       | `tf.acosh(x)`                                                | `nn.acosh(x)`                                                | Implemented with TypeShade builtin; CPU/WebGPU; Tensor-graph gradient                                       |
+| P2       | `tf.asin(x)`                                                 | `nn.asin(x)`                                                 | Implemented with TypeShade builtin; CPU/WebGPU; Tensor-graph gradient                                       |
+| P2       | `tf.asinh(x)`                                                | `nn.asinh(x)`                                                | Implemented with TypeShade builtin; CPU/WebGPU; Tensor-graph gradient                                       |
+| P2       | `tf.atan(x)`                                                 | `nn.atan(x)`                                                 | Implemented with TypeShade builtin; CPU/WebGPU; Tensor-graph gradient                                       |
+| P2       | `tf.atan2(a, b)`                                             | `nn.atan2(a, b)`                                             | TODO                                                                                                        |
+| P2       | `tf.atanh(x)`                                                | `nn.atanh(x)`                                                | Implemented with TypeShade builtin; CPU/WebGPU; Tensor-graph gradient                                       |
+| P2       | `tf.ceil(x)`                                                 | `nn.ceil(x)`                                                 | Implemented                                                                                                 |
+| P2       | `tf.cos(x)`                                                  | `nn.cos(x)`                                                  | Implemented                                                                                                 |
+| P2       | `tf.cosh(x)`                                                 | `nn.cosh(x)`                                                 | Implemented                                                                                                 |
+| P2       | `tf.erf(x)`                                                  | `nn.erf(x)`                                                  | TODO                                                                                                        |
+| P2       | `tf.expm1(x)`                                                | `nn.expm1(x)`                                                | Implemented with a small-input series                                                                       |
+| P2       | `tf.floor(x)`                                                | `nn.floor(x)`                                                | Implemented                                                                                                 |
+| P2       | `tf.floorDiv(a, b)`                                          | `nn.floorDiv(a, b)`                                          | TODO                                                                                                        |
+| P2       | `tf.log1p(x)`                                                | `nn.log1p(x)`                                                | Implemented with a small-input series                                                                       |
+| P2       | `tf.mod(a, b)`                                               | `nn.mod(a, b)`                                               | TODO                                                                                                        |
+| P2       | `tf.notEqual(a, b)`                                          | `nn.notEqual(a, b)`                                          | TODO                                                                                                        |
+| P2       | `tf.greaterEqual(a, b)`                                      | `nn.greaterEqual(a, b)`                                      | TODO                                                                                                        |
+| P2       | `tf.lessEqual(a, b)`                                         | `nn.lessEqual(a, b)`                                         | TODO                                                                                                        |
+| P2       | `tf.reciprocal(x)`                                           | `nn.reciprocal(x)`                                           | Implemented                                                                                                 |
+| P2       | `tf.round(x)`                                                | `nn.round(x)`                                                | Implemented                                                                                                 |
+| P2       | `tf.rsqrt(x)`                                                | `nn.rsqrt(x)`                                                | Implemented                                                                                                 |
+| P2       | `tf.sign(x)`                                                 | `nn.sign(x)`                                                 | Implemented                                                                                                 |
+| P2       | `tf.sin(x)`                                                  | `nn.sin(x)`                                                  | Implemented                                                                                                 |
+| P2       | `tf.sinh(x)`                                                 | `nn.sinh(x)`                                                 | Implemented                                                                                                 |
+| P2       | `tf.step(x)`                                                 | `nn.step(x)`                                                 | Implemented as 0 for negative inputs, 1 otherwise; zero Tensor-graph gradient                               |
+| P2       | `tf.tan(x)`                                                  | `nn.tan(x)`                                                  | Implemented with sin/cos                                                                                    |
+| P2       | `tf.expandDims(x, axis)`                                     | `nn.expandDims(x, axis)`                                     | TODO                                                                                                        |
+| P2       | `tf.reverse(x, axis)`                                        | `nn.reverse(x, axis)`                                        | TODO                                                                                                        |
+| P2       | `tf.slice(x, begin, size)`                                   | `nn.slice(x, begin, size)`                                   | TODO                                                                                                        |
+| P2       | `tf.stridedSlice(x, ...)`                                    | `nn.stridedSlice(x, ...)`                                    | TODO                                                                                                        |
+| P2       | `tf.tile(x, reps)`                                           | `nn.tile(x, reps)`                                           | TODO                                                                                                        |
+| P2       | `tf.gatherND(x, indices)`                                    | `nn.gatherND(x, indices)`                                    | TODO                                                                                                        |
+| P2       | `tf.pack(tensors, axis)`                                     | `nn.pack(tensors, axis)`                                     | TODO                                                                                                        |
+| P2       | `tf.unstack(x, axis)`                                        | `nn.unstack(x, axis)`                                        | TODO                                                                                                        |
+| P2       | `tf.diag(x)`                                                 | `nn.diag(x)`                                                 | TODO                                                                                                        |
+| P2       | `tf.mirrorPad(x, paddings, mode)`                            | `nn.mirrorPad(x, paddings, mode)`                            | TODO                                                                                                        |
+| P2       | `tf.spaceToBatchND(x, blockShape, paddings)`                 | `nn.spaceToBatchND(x, blockShape, paddings)`                 | TODO                                                                                                        |
+| P2       | `tf.batchToSpaceND(x, blockShape, crops)`                    | `nn.batchToSpaceND(x, blockShape, crops)`                    | TODO                                                                                                        |
+| P2       | `tf.cast(x, dtype)`                                          | `nn.cast(x, dtype)`                                          | TODO                                                                                                        |
+| P2       | `tf.fill(shape, value)`                                      | `nn.fill(shape, value)`                                      | TODO                                                                                                        |
+| P2       | `tf.onesLike(x)`                                             | `nn.onesLike(x)`                                             | TODO                                                                                                        |
+| P2       | `tf.zerosLike(x)`                                            | `nn.zerosLike(x)`                                            | TODO                                                                                                        |
+| P2       | `tf.oneHot(indices, depth)`                                  | `nn.oneHot(indices, depth)`                                  | TODO                                                                                                        |
+| P2       | `tf.range(start, stop, step)`                                | `nn.range(start, stop, step)`                                | TODO                                                                                                        |
+| P2       | `tf.linspace(start, stop, num)`                              | `nn.linspace(start, stop, num)`                              | TODO                                                                                                        |
+| P2       | `tf.scatterND(indices, updates, shape)`                      | `nn.scatterND(indices, updates, shape)`                      | TODO                                                                                                        |
+| P2       | `tf.tensorScatterUpdate(x, indices, updates)`                | `nn.tensorScatterUpdate(x, indices, updates)`                | TODO                                                                                                        |
+| P2       | `tf.topk(x, k)`                                              | `nn.topk(x, k)`                                              | TODO                                                                                                        |
+| P2       | `tf.searchSorted(sorted, values)`                            | `nn.searchSorted(sorted, values)`                            | TODO                                                                                                        |
+| P2       | `tf.sparseSegmentSum(data, indices, segmentIds)`             | `nn.sparseSegmentSum(data, indices, segmentIds)`             | TODO                                                                                                        |
+| P2       | `tf.sparseSegmentMean(data, indices, segmentIds)`            | `nn.sparseSegmentMean(data, indices, segmentIds)`            | TODO                                                                                                        |
+| P3       | `tf.conv3d(x, filter, ...)`                                  | `nn.conv3d(x, filter, ...)`                                  | TODO                                                                                                        |
+| P3       | `tf.avgPool3d(x, ...)`                                       | `nn.avgPool3d(x, ...)`                                       | TODO                                                                                                        |
+| P3       | `tf.maxPool3d(x, ...)`                                       | `nn.maxPool3d(x, ...)`                                       | TODO                                                                                                        |
+| P3       | `tf.cropAndResize(image, boxes, boxIndex, cropSize)`         | `nn.cropAndResize(image, boxes, boxIndex, cropSize)`         | TODO                                                                                                        |
+| P3       | `tf.image.resizeBilinear(x, size)`                           | `nn.image.resizeBilinear(x, size)`                           | TODO                                                                                                        |
+| P3       | `tf.image.resizeNearestNeighbor(x, size)`                    | `nn.image.resizeNearestNeighbor(x, size)`                    | TODO                                                                                                        |
+| P3       | `tf.image.flipLeftRight(x)`                                  | `nn.image.flipLeftRight(x)`                                  | TODO                                                                                                        |
+| P3       | `tf.image.rotateWithOffset(x, radians, fillValue)`           | `nn.image.rotateWithOffset(x, radians, fillValue)`           | TODO                                                                                                        |
+| P3       | `tf.complex(real, imag)`                                     | `nn.complex(real, imag)`                                     | TODO                                                                                                        |
+| P3       | `tf.spectral.fft(x)`                                         | `nn.fft(x)`                                                  | TODO                                                                                                        |
+| P3       | `tf.spectral.ifft(x)`                                        | `nn.ifft(x)`                                                 | TODO                                                                                                        |
+| P3       | `tf.multinomial(logits, numSamples)`                         | `nn.multinomial(logits, numSamples)`                         | TODO                                                                                                        |
+| P3       | `tf.image.nonMaxSuppression(boxes, scores, maxOutputSize)`   | `nn.image.nonMaxSuppression(boxes, scores, maxOutputSize)`   | TODO                                                                                                        |
+| P3       | `tf.string.ngrams(...)`                                      | `nn.string.ngrams(...)`                                      | TODO                                                                                                        |
+| P2       | `tf.argMin(x, axis)`                                         | `nn.argMin(x, axis)`                                         | Implemented; indices are represented as float32 tensors                                                     |
+| P2       | `tf.cumsum(x, axis)`                                         | `nn.cumsum(x, axis)`                                         | TODO                                                                                                        |
+| P2       | `tf.cumprod(x, axis)`                                        | `nn.cumprod(x, axis)`                                        | TODO                                                                                                        |
+| P2       | `tf.logicalAnd(a, b)`                                        | `nn.logicalAnd(a, b)`                                        | TODO                                                                                                        |
+| P2       | `tf.logicalOr(a, b)`                                         | `nn.logicalOr(a, b)`                                         | TODO                                                                                                        |
+| P2       | `tf.logicalNot(x)`                                           | `nn.logicalNot(x)`                                           | TODO                                                                                                        |
+| P2       | `tf.isFinite(x)`                                             | `nn.isFinite(x)`                                             | TODO                                                                                                        |
+| P2       | `tf.isInf(x)`                                                | `nn.isInf(x)`                                                | TODO                                                                                                        |
+| P2       | `tf.isNaN(x)`                                                | `nn.isNaN(x)`                                                | TODO                                                                                                        |
+| P2       | `tf.depthToSpace(x, blockSize)`                              | `nn.depthToSpace(x, blockSize)`                              | TODO                                                                                                        |
+| P2       | `tf.dilation2d(x, filter, ...)`                              | `nn.dilation2d(x, filter, ...)`                              | TODO                                                                                                        |
+| P2       | `tf.einsum(equation, tensors)`                               | `nn.einsum(equation, tensors)`                               | TODO                                                                                                        |
+| P2       | `tf.unsortedSegmentSum(x, segmentIds, numSegments)`          | `nn.unsortedSegmentSum(x, segmentIds, numSegments)`          | TODO                                                                                                        |
+| P2       | `tf.sparseToDense(sparseIndices, outputShape, sparseValues)` | `nn.sparseToDense(sparseIndices, outputShape, sparseValues)` | TODO                                                                                                        |
+| P2       | `tf.bincount(x, weights, size)`                              | `nn.bincount(x, weights, size)`                              | TODO                                                                                                        |
+| P2       | `tf.denseBincount(x, weights, size)`                         | `nn.denseBincount(x, weights, size)`                         | TODO                                                                                                        |
+| P2       | `tf.real(x)`                                                 | `nn.real(x)`                                                 | TODO                                                                                                        |
+| P2       | `tf.imag(x)`                                                 | `nn.imag(x)`                                                 | TODO                                                                                                        |
+| P2       | `tf.abs(x)` for complex tensors                              | `nn.abs(x)` for complex tensors                              | Dtype expansion TODO; f32 implemented above                                                                 |
+| P3       | `tf.maxPoolWithArgmax(x, ...)`                               | `nn.maxPoolWithArgmax(x, ...)`                               | TODO                                                                                                        |
+| P3       | `tf.browser.fromPixels(pixels)`                              | `nn.image.fromPixels(pixels)`                                | TODO                                                                                                        |
 
 Autograd-only configs such as `Conv2DBackpropFilter`, `Conv2DBackpropInput`, pool
 gradients, and `EluGrad` are implementation requirements for gradient rules rather
@@ -216,7 +215,7 @@ Checked on 2026-10-10 against [`tfjs-backend-webgpu/src/kernels`](https://github
 These are not replacements for the forward API above. Each differentiable operation
 needs a gradient rule and corresponding execution path before TypeNN can train arbitrary models.
 
-- [x] Implement explicit TypeShade forward, stable objective, backward, reduction, and SGD update kernels for one `Linear` classifier.
+- [x] Train one `Linear` classifier with `createTrainer()`. A step is a Tensor graph (`matmul`, bias, mean softmax cross entropy), `backward()` and an `SGD` step. The dedicated `linear-*` kernels are removed.
 - [x] Add `createTrainer()` with batched integer-label data and `onEpoch` metrics across TypeShade CPU/WebGPU/WebGL2 execution.
 - [ ] Generalize `createTrainer().fit()` to `Sequential` models. The explicit PyTorch-style loop now supports a user-defined `Module` with multiple `Linear` layers, ReLU, Dropout, `backward()`, and SGD/Adam.
 
@@ -226,121 +225,82 @@ needs a gradient rule and corresponding execution path before TypeNN can train a
 - [x] Add softmax/log-softmax gradient kernels to Tensor-graph autograd.
 - [ ] Add `prod`/`max`/`min` reduction gradients and special activation gradient rules.
 - [x] Connect `nn.softmaxCrossEntropyWithLogits()` and `sum`/`mean` reductions to Tensor-graph autograd.
-- [x] Add trainable graph parameters, accumulated `Tensor.backward()` gradients, `zeroGrad()`, and SGD/Adam optimizer objects. Adam moments and parameter updates currently run on host arrays.
+- [x] Add trainable graph parameters, accumulated `Tensor.backward()` gradients, `zeroGrad()`, and SGD/Adam optimizer objects. An optimizer reads all its gradients in one plan. Adam moments and parameter updates currently run on host arrays.
 - [ ] Use TypeShade `gradCheck` against its f64 CPU oracle for generated Shade derivatives.
 
 ## API and kernel implementation notes
 
-- [x] Keep one TypeShade compute entrypoint per `src/kernels/<operation>.shade.ts` file, with filenames following the operation name (for example, `add.shade.ts` and `relu.shade.ts`). The runtime registry imports every kernel source separately.
-- [x] Split TypeShade CPU graph evaluation into node-kind dispatch and elementwise, reduction, normalization, loss, spatial, and linear-algebra executor modules.
-- [x] Split TypeNN graph-node types into individual files under `src/tensor/nodes/` and keep `src/tensor/node.ts` as a compatibility re-export.
-- [x] Split Tensor graph builders into elementwise, linear-algebra, spatial, normalization, loss, and reduction modules.
+- [x] Write every operation as a TypeShade kernel function in `src/kernels`, in eight modules: `map`, `binary`, `reduce`, `matmul`, `softmax`, `loss`, `conv` and `pool`. The host calls `kernel(out, ...arrays, ...values)`.
+- [x] Run every `data()` as one `fuse` scope (`typeshade/fuse`) through one executor, `src/runtime/execute.ts`. The three tiers share it. No separate CPU executor remains.
+- [x] Keep one graph node type, `OpNode`, in `src/tensor/node.ts`. It holds the kernel function, the input Tensors, the scalar values and the gradient closure.
+- [x] Split Tensor graph builders into elementwise, linear-algebra, spatial, normalization, loss, shape, and reduction modules under `src/tensor/operations`.
 - [x] Split public operation wrappers by operation family; keep `src/nn/ops.ts` as a re-export barrel.
 - [x] Split each layer class into its own file; keep `src/nn/layers.ts` as a re-export barrel and `Sequential` in its own file.
-- [x] Add shape-checked `reshape()` with CPU/WebGPU execution and a matching autograd rule.
+- [x] Add shape-checked `reshape()` with CPU/WebGPU execution and a matching autograd rule. It runs the `copy` kernel function.
 - [x] Add `Flatten`, `Dropout`, `Dense`, `Module.to()/parameters()/train()/eval()`, sparse-label `CrossEntropyLoss`, `Tensor.backward()/zeroGrad()`, and explicit SGD/Adam updates for the MNIST model loop.
-- [x] Split GPU graph execution, resident buffer ownership, backend selection, pipeline preparation, and linear-training dispatch out of `src/runtime/device.ts`.
-- [x] Add `npm run lint` to check formatting across TypeScript, TypeShade, docs, and configuration files.
+- [x] Reduce `src/runtime` to `device.ts` (tier selection, resident ownership, reports), `device-types.ts` and `execute.ts`.
+- [x] Report the plan of each read as `device.lastReport` and `device.reports`.
+- [x] Add `npm run lint`, `npm test` and `npm run test:gpu`. CI runs them as the `cpu` and `gpu` jobs.
+- [x] Test every operation on the CPU tier against a plain JavaScript reference, and on WebGPU and WebGL2 against the CPU tier (`tests/_cases.mjs`).
 - [ ] Export remaining listed operations as `nn.*` functions from `src/index.ts`; tensor instance methods may remain as conveniences. Newly completed inverse-trigonometric functions, `step`, and `reshape` are exported.
-- [ ] Keep shape inference and validation in TypeNN's graph layer; keep device execution in TypeShade-backed kernels.
-- [ ] Support CPU and WebGPU paths for each operation before marking it implemented. Record rank, dtype, broadcasting, and axis limits when support is partial.
-- [ ] Add each operation to the graph node union, runtime dispatch, CPU reference path, and TypeShade program manifest as applicable.
+- [ ] Keep shape inference and validation in TypeNN's graph layer; keep device execution in TypeShade kernel functions.
+- [ ] Record rank, dtype, broadcasting, and axis limits when an operation's support is partial.
 
-## TypeShade kernel source review
+## Open items
 
-Re-reviewed the existing 65 source files individually on 2026-10-11, including `add.shade.ts`. The new inverse-trigonometric, `step`, and `reshape` kernels were separately checked for operation semantics, bounds, entrypoint naming, CPU generation, and WebGPU compilation.
-The checklist records the single exported compute entrypoint in each file. Review scope
-was bounds checks, shape/index calculations, operation semantics, and naming. The audit found and fixed
-broadcast-gradient branching, temporary generated-style names, max-pool handling for
-negative infinity, cross-entropy gradients for labels whose row sums are not one, and
-manual `tan`/hyperbolic/reciprocal-square-root formulas where TypeShade built-ins exist.
-`npm run build` compiles the TypeShade sources and generated CPU views; it does not
-replace numerical runtime tests.
+Each row gives the reason and the next action. A next action marked "proposal" is not decided.
 
-| Source file                                  | Entry point                           | Source review |
-| -------------------------------------------- | ------------------------------------- | ------------- |
-| `abs.shade.ts`                               | `absKernel`                           | Reviewed      |
-| `add.shade.ts`                               | `addKernel`                           | Reviewed      |
-| `arg-max.shade.ts`                           | `argMaxKernel`                        | Reviewed      |
-| `arg-min.shade.ts`                           | `argMinKernel`                        | Reviewed      |
-| `avg-pool-grad.shade.ts`                     | `avgPoolGradKernel`                   | Reviewed      |
-| `avg-pool.shade.ts`                          | `avgPoolKernel`                       | Reviewed      |
-| `binary-grad.shade.ts`                       | `binaryGradKernel`                    | Reviewed      |
-| `ceil.shade.ts`                              | `ceilKernel`                          | Reviewed      |
-| `clip-by-value.shade.ts`                     | `clipByValueKernel`                   | Reviewed      |
-| `conv2d-filter-grad.shade.ts`                | `conv2dFilterGradKernel`              | Reviewed      |
-| `conv2d-input-grad.shade.ts`                 | `conv2dInputGradKernel`               | Reviewed      |
-| `conv2d.shade.ts`                            | `conv2dKernel`                        | Reviewed      |
-| `cos.shade.ts`                               | `cosKernel`                           | Reviewed      |
-| `cosh.shade.ts`                              | `coshKernel`                          | Reviewed      |
-| `cross-entropy-labels-grad.shade.ts`         | `crossEntropyLabelsGradKernel`        | Reviewed      |
-| `cross-entropy-logits-grad.shade.ts`         | `crossEntropyLogitsGradKernel`        | Reviewed      |
-| `div.shade.ts`                               | `divKernel`                           | Reviewed      |
-| `elu.shade.ts`                               | `eluKernel`                           | Reviewed      |
-| `exp.shade.ts`                               | `expKernel`                           | Reviewed      |
-| `expm1.shade.ts`                             | `expm1Kernel`                         | Reviewed      |
-| `floor.shade.ts`                             | `floorKernel`                         | Reviewed      |
-| `gelu.shade.ts`                              | `geluKernel`                          | Reviewed      |
-| `leaky-relu.shade.ts`                        | `leakyReluKernel`                     | Reviewed      |
-| `linear-backward.shade.ts`                   | `linearBackwardKernel`                | Reviewed      |
-| `linear-forward.shade.ts`                    | `linearForwardKernel`                 | Reviewed      |
-| `linear-objective.shade.ts`                  | `linearObjectiveKernel`               | Reviewed      |
-| `linear-reduce.shade.ts`                     | `linearReduceKernel`                  | Reviewed      |
-| `linear-update.shade.ts`                     | `linearUpdateKernel`                  | Reviewed      |
-| `log-softmax.shade.ts`                       | `logSoftmaxKernel`                    | Reviewed      |
-| `log.shade.ts`                               | `logKernel`                           | Reviewed      |
-| `log1p.shade.ts`                             | `log1pKernel`                         | Reviewed      |
-| `matmul.shade.ts`                            | `matmulKernel`                        | Reviewed      |
-| `max-pool-grad.shade.ts`                     | `maxPoolGradKernel`                   | Reviewed      |
-| `max-pool.shade.ts`                          | `maxPoolKernel`                       | Reviewed      |
-| `max.shade.ts`                               | `maxKernel`                           | Reviewed      |
-| `maximum.shade.ts`                           | `maximumKernel`                       | Reviewed      |
-| `mean.shade.ts`                              | `meanKernel`                          | Reviewed      |
-| `min.shade.ts`                               | `minKernel`                           | Reviewed      |
-| `minimum.shade.ts`                           | `minimumKernel`                       | Reviewed      |
-| `mul.shade.ts`                               | `mulKernel`                           | Reviewed      |
-| `neg.shade.ts`                               | `negKernel`                           | Reviewed      |
-| `pow.shade.ts`                               | `powKernel`                           | Reviewed      |
-| `prelu.shade.ts`                             | `preluKernel`                         | Reviewed      |
-| `prod.shade.ts`                              | `prodKernel`                          | Reviewed      |
-| `reciprocal.shade.ts`                        | `reciprocalKernel`                    | Reviewed      |
-| `reduce-grad.shade.ts`                       | `reduceGradKernel`                    | Reviewed      |
-| `relu-grad.shade.ts`                         | `reluGradKernel`                      | Reviewed      |
-| `relu.shade.ts`                              | `reluKernel`                          | Reviewed      |
-| `relu6.shade.ts`                             | `relu6Kernel`                         | Reviewed      |
-| `round.shade.ts`                             | `roundKernel`                         | Reviewed      |
-| `rsqrt.shade.ts`                             | `rsqrtKernel`                         | Reviewed      |
-| `sigmoid.shade.ts`                           | `sigmoidKernel`                       | Reviewed      |
-| `sign.shade.ts`                              | `signKernel`                          | Reviewed      |
-| `sin.shade.ts`                               | `sinKernel`                           | Reviewed      |
-| `sinh.shade.ts`                              | `sinhKernel`                          | Reviewed      |
-| `softmax-cross-entropy-with-logits.shade.ts` | `softmaxCrossEntropyWithLogitsKernel` | Reviewed      |
-| `softmax-grad.shade.ts`                      | `softmaxGradKernel`                   | Reviewed      |
-| `softmax.shade.ts`                           | `softmaxKernel`                       | Reviewed      |
-| `softplus.shade.ts`                          | `softplusKernel`                      | Reviewed      |
-| `sqrt.shade.ts`                              | `sqrtKernel`                          | Reviewed      |
-| `square.shade.ts`                            | `squareKernel`                        | Reviewed      |
-| `sub.shade.ts`                               | `subKernel`                           | Reviewed      |
-| `sum.shade.ts`                               | `sumKernel`                           | Reviewed      |
-| `tan.shade.ts`                               | `tanKernel`                           | Reviewed      |
-| `tanh.shade.ts`                              | `tanhKernel`                          | Reviewed      |
-| `acos.shade.ts`                              | `acosKernel`                          | Reviewed      |
-| `acosh.shade.ts`                             | `acoshKernel`                         | Reviewed      |
-| `asin.shade.ts`                              | `asinKernel`                          | Reviewed      |
-| `asinh.shade.ts`                             | `asinhKernel`                         | Reviewed      |
-| `atan.shade.ts`                              | `atanKernel`                          | Reviewed      |
-| `atanh.shade.ts`                             | `atanhKernel`                         | Reviewed      |
-| `reshape.shade.ts`                           | `reshapeKernel`                       | Reviewed      |
-| `step.shade.ts`                              | `stepKernel`                          | Reviewed      |
+| Item                                           | Reason                                                                                                                                                                                                                                    | Next action                                                                                                                                       |
+| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A long chain splits into several dispatches    | Every operation output is a `Resident` array, and one dispatch binds at most 8 storage buffers (F5). `a.add(b).add(c).add(d).add(e).add(f).relu()` is two dispatches. A later `data()` or a gradient graph may read any output.           | Proposal: an inference mode in which only the roots of a `data()` keep arrays, and the other outputs are scratch arrays.                          |
+| `reshape` costs a dispatch                     | `reshape` runs the `copy` kernel function. The flatten is one of the five dispatches of the MNIST forward.                                                                                                                                | Proposal: share the array of the input with the reshaped Tensor, and count the owners before `dispose()` frees it.                                |
+| Reductions over all axes run in one invocation | `sum()`, `mean()` and the other reductions without an axis have one output element, so one invocation reads the whole input (Rule 8.22).                                                                                                  | Proposal: a two-stage reduction as two kernel functions with a scratch array between them. Measure it first.                                      |
+| Softmax and the losses repeat work             | Each output element finds the maximum and the sum of its slice again. The work of a slice grows with the square of the axis size.                                                                                                         | Proposal: one kernel function that writes the maximum and the sum of each slice once, and a second that reads them. Measure it on hardware first. |
+| `matmul` and `conv2d` have no tiling           | Each output element is one invocation with a serial loop. A call that reads an array through an index stands apart from the call that wrote it (F3).                                                                                      | Benchmark tiled variants on hardware before replacing them.                                                                                       |
+| `maxPoolGrad` repeats work                     | Each input element recomputes the maximum of every output window that contains it. This is correct for the tie rule.                                                                                                                      | Measure on hardware, then decide.                                                                                                                 |
+| SwiftShader trigonometry                       | On SwiftShader, `sin`, `cos`, `tan`, `acos` and the gradients through them differ from the f32 reference by more than 1e-5 relative. The worst absolute error of `sin` and `cos` is 1.9e-4. Seven cases are listed in `SWIFTSHADER_TRIG`. | Run `npm run test:gpu` on a hardware GPU. Remove the list if the cases agree.                                                                     |
+| The optimizer update runs on the host          | SGD and Adam read the gradients back and write the parameters from the host.                                                                                                                                                              | Proposal: write the update as kernel functions in the plan of the backward pass.                                                                  |
+| No hardware GPU run                            | The GPU tests ran on SwiftShader in Chromium 141 only. No time on SwiftShader says how fast a hardware GPU trains.                                                                                                                        | Run `node scripts/bench-step.mjs` and `npm run test:gpu` on a machine with a GPU.                                                                 |
+| `publish.yml` is stale                         | Its check expects an empty namespace (`Object.keys(nn).length !== 0`), and the package exports names. It was so before this change.                                                                                                       | The owner decides what the pre-publish check must hold.                                                                                           |
 
-### Findings and limits
+### Gaps in TypeShade at commit 5fb79c7
 
-- The source review did not identify another clear bounds or index-calculation defect.
-  This is a source-level result; it does not establish CPU/WebGPU numerical parity.
-- Reduction, matmul, and convolution kernels use per-output accumulation. Tiled or
-  multi-pass variants need benchmark evidence before replacing these implementations.
-- `maxPoolGrad` recomputes each intersecting output window's maximum for every input
-  element. This is correct for the current tie rule but can repeat substantial work.
-- Softmax and cross-entropy kernels reduce each row or axis slice within one invocation.
-  Long axes may need a parallel reduction path.
-- [ ] Add numerical CPU/WebGPU parity coverage and benchmark representative shapes.
+TypeNN works around each gap. None is filed as an issue yet.
+
+- A kernel function cannot share the name of a builtin that it calls (TS8099 and TS8031). This is as
+  specified. TypeNN names the maps `<operation>Map`.
+- An array parameter named like a reserved WGSL word compiles for the CPU and WebGL2 tiers. WebGPU
+  refuses it at pipeline creation: `'filter' is a reserved keyword`. The surface document (section 62) says that the compiler escapes the spelling of a parameter that a target reserves, and refuses
+  a reserved interface name with TS8068. The array parameter of a kernel function got neither.
+- One `Resident` passed as two parameters of one call throws a `TypeError`. TypeNN passes a copy.
+- After a plan fails validation on WebGPU, the uniform buffer of that plan's arguments stays
+  undestroyed. It survived `device.dispose()` on the recording device. The size is 16, the usage 76.
+- On the CPU tier, `toCpu` (`src/core/host-entry.ts`, called by `onCpu` in `src/core/host-kernel.ts`)
+  copies each array argument to a JavaScript array on each call, and `fromCpu` copies it back. Three
+  calls over 2^24 + 1 elements reach 3.3 GB of resident memory. The build before this change reached
+  2.3 GB on the same chain.
+
+## Kernel function modules
+
+`src/kernels` holds 85 kernel functions in eight modules. The numerics cases of `tests/_cases.mjs`
+hold every operation: on the CPU tier against a plain JavaScript reference, and on WebGPU and WebGL2
+against the CPU tier. A case is a Tensor graph built with the public API. Each case carries its
+tolerance: exact for the operations that are exact on a GPU, 1e-5 relative for the rest.
+
+| Source file        | Kernel functions | Cases that hold them                                                                                   |
+| ------------------ | ---------------: | ------------------------------------------------------------------------------------------------------ |
+| `map.shade.ts`     |               37 | `map <name>`, `gradient of <name>`, `graph <name>`, `chain relu((a + b) * c)`                          |
+| `binary.shade.ts`  |               25 | `binary <op>, <kind>`, `gradient of binary <op> with respect to <target>, <kind>`                      |
+| `reduce.shade.ts`  |                8 | `reduction <op>, shape, axis`, `reduction <op> with ties`, `gradient of <op>, shape, axis`             |
+| `matmul.shade.ts`  |                1 | `matmul <label>`, `gradient of matmul <label> with respect to <target>`, `matmul, add a bias, relu`    |
+| `softmax.shade.ts` |                4 | `softmax, shape, axis`, `logSoftmax, shape, axis`, their gradients, `softmax of large logits`          |
+| `loss.shade.ts`    |                3 | `softmax cross entropy, <reduction>`, `gradient of softmax cross entropy with respect to the <target>` |
+| `conv.shade.ts`    |                3 | `conv2d <label>`, `gradient of conv2d with respect to the <target>`, `conv2dGradients`                 |
+| `pool.shade.ts`    |                4 | `maxPool` and `avgPool`, their gradients in the graph, `maxPoolGrad` and `avgPoolGrad`                 |
+
+The review of 65 source files on 2026-10-11 no longer applies, because every source file was
+rewritten as a kernel function. The cases above check values, and not the source text. A review of
+the source for bounds and index calculations is open.
+
+- [ ] Review the 85 kernel functions for bounds, index calculations and naming, as the earlier review did for its files.
+- [ ] Run the numerics cases and benchmark representative shapes on a hardware GPU.
