@@ -14,15 +14,12 @@ import {
   special,
   unary,
 } from "./operations/elementwise.js";
+import { matmul, type MatmulOptions } from "./operations/linear-algebra.js";
+import { reduce } from "./operations/reductions.js";
 import { reshape } from "./operations/shape.js";
 import type { Conv2DOptions, Pool2DOptions } from "./spatial.js";
 
 export type { Conv2DOptions, Pool2DOptions } from "./spatial.js";
-
-export interface MatmulOptions {
-  readonly transposeA?: boolean;
-  readonly transposeB?: boolean;
-}
 
 /** Until the operation has its kernel functions. */
 function notYet(operation: string): never {
@@ -190,8 +187,8 @@ export class Tensor {
     return binary(this, alpha, "prelu");
   }
 
-  matmul(_other: Tensor, _options: MatmulOptions = {}): Tensor {
-    return notYet("matmul");
+  matmul(other: Tensor, options: MatmulOptions = {}): Tensor {
+    return matmul(this, other, options);
   }
 
   conv2d(_filter: Tensor, _options: Conv2DOptions = {}): Tensor {
@@ -233,26 +230,26 @@ export class Tensor {
     return notYet("softmaxCrossEntropyWithLogits");
   }
 
-  sum(_axis?: number): Tensor {
-    return notYet("sum");
+  sum(axis?: number): Tensor {
+    return reduce(this, "sum", axis);
   }
-  mean(_axis?: number): Tensor {
-    return notYet("mean");
+  mean(axis?: number): Tensor {
+    return reduce(this, "mean", axis);
   }
-  prod(_axis?: number): Tensor {
-    return notYet("prod");
+  prod(axis?: number): Tensor {
+    return reduce(this, "prod", axis);
   }
-  max(_axis?: number): Tensor {
-    return notYet("max");
+  max(axis?: number): Tensor {
+    return reduce(this, "max", axis);
   }
-  min(_axis?: number): Tensor {
-    return notYet("min");
+  min(axis?: number): Tensor {
+    return reduce(this, "min", axis);
   }
-  argMax(_axis = 0): Tensor {
-    return notYet("argMax");
+  argMax(axis = 0): Tensor {
+    return reduce(this, "argMax", axis);
   }
-  argMin(_axis = 0): Tensor {
-    return notYet("argMin");
+  argMin(axis = 0): Tensor {
+    return reduce(this, "argMin", axis);
   }
 
   async data(): Promise<Float32Array> {

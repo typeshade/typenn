@@ -350,3 +350,133 @@ export function binaryGradReference(op, aShape, a, bShape, b, dy) {
   }
   return [Float32Array.from(ga), Float32Array.from(gb)];
 }
+
+// ─── reductions and matmul ────────────────────────────────────────────────────────────────────
+
+/** The input of a reduction as [outer, axisSize, inner]; `axis` undefined reduces every axis. */
+export function axisLayout(shape, axis) {
+  if (axis === undefined)
+    return { outer: 1, axisSize: sizeOf(shape), inner: 1, outShape: [] };
+  const at = axis < 0 ? axis + shape.length : axis;
+  return {
+    outer: sizeOf(shape.slice(0, at)),
+    axisSize: shape[at],
+    inner: sizeOf(shape.slice(at + 1)),
+    outShape: shape.filter((_, index) => index !== at),
+  };
+}
+
+/** Each reduction: the reference step along the axis, in index order, as the kernel adds. */
+export const REDUCTIONS = {
+  sum: { tolerance: 0, gpu: 1e-5, range: [-3, 3] },
+  mean: { tolerance: 0, gpu: 1e-5, range: [-3, 3] },
+  prod: { tolerance: 0, gpu: 1e-5, range: [0.5, 1.5] },
+  max: { tolerance: 0, range: [-3, 3] },
+  min: { tolerance: 0, range: [-3, 3] },
+  argMax: { tolerance: 0, range: [-3, 3] },
+  argMin: { tolerance: 0, range: [-3, 3] },
+};
+
+export function reduceReference(op, shape, x, axis) {
+  const { outer, axisSize, inner } = axisLayout(shape, axis);
+  const out = new Float32Array(outer * inner);
+  for (let o = 0; o < outer; o++) {
+    for (let n = 0; n < inner; n++) {
+      const at = (k) => x[(o * axisSize + k) * inner + n];
+      let total = op === "prod" ? 1 : 0;
+      let best = at(0);
+      let bestIndex = 0;
+      for (let k = 0; k < axisSize; k++) {
+        const v = at(k);
+        if (op === "sum" || op === "mean") total = f32(total + v);
+        else if (op === "prod") total = f32(total * v);
+        else if (op === "max") best = Math.max(best, v);
+        else if (op === "min") best = Math.min(best, v);
+        else if (op === "argMax" && v > best) [best, bestIndex] = [v, k];
+        else if (op === "argMin" && v < best) [best, bestIndex] = [v, k];
+      }
+      out[o * inner + n] =
+        op === "mean"
+          ? f32(total / axisSize)
+          : op === "sum" || op === "prod"
+            ? total
+            : op === "argMax" || op === "argMin"
+              ? bestIndex
+              : best;
+    }
+  }
+  return out;
+}
+
+/** The gradient of a sum or a mean over `axis`, from the gradient of the output. */
+export function reduceGradReference(op, shape, dy, axis) {
+  const { axisSize, inner } = axisLayout(shape, axis);
+  const scale = op === "mean" ? f32(1 / axisSize) : 1;
+  return Float32Array.from({ length: sizeOf(shape) }, (_, i) =>
+    f32(dy[Math.floor(i / (axisSize * inner)) * inner + (i % inner)] * scale),
+  );
+}
+
+/** `op(a) op(b)` for rank-2 matrices; a transposed matrix is stored transposed. */
+export function matmulShape(aShape, bShape, transposeA, transposeB) {
+  const rows = transposeA ? aShape[1] : aShape[0];
+  const inner = transposeA ? aShape[0] : aShape[1];
+  const cols = transposeB ? bShape[0] : bShape[1];
+  return { rows, inner, cols };
+}
+
+const entryA = (a, { rows, inner }, transposeA, i, k) =>
+  a[transposeA ? k * rows + i : i * inner + k];
+const entryB = (b, { inner, cols }, transposeB, k, j) =>
+  b[transposeB ? j * inner + k : k * cols + j];
+
+export function matmulReference(
+  a,
+  aShape,
+  b,
+  bShape,
+  transposeA = false,
+  transposeB = false,
+) {
+  const dims = matmulShape(aShape, bShape, transposeA, transposeB);
+  const out = new Float32Array(dims.rows * dims.cols);
+  for (let i = 0; i < dims.rows; i++)
+    for (let j = 0; j < dims.cols; j++) {
+      let total = 0;
+      for (let k = 0; k < dims.inner; k++)
+        total = f32(
+          total +
+            f32(
+              entryA(a, dims, transposeA, i, k) *
+                entryB(b, dims, transposeB, k, j),
+            ),
+        );
+      out[i * dims.cols + j] = total;
+    }
+  return out;
+}
+
+/** The gradients of a matmul with respect to a and b, in the layouts a and b are stored in. */
+export function matmulGradReference(
+  a,
+  aShape,
+  b,
+  bShape,
+  transposeA,
+  transposeB,
+  dc,
+) {
+  const dims = matmulShape(aShape, bShape, transposeA, transposeB);
+  const da = new Float64Array(a.length);
+  const db = new Float64Array(b.length);
+  for (let i = 0; i < dims.rows; i++)
+    for (let j = 0; j < dims.cols; j++)
+      for (let k = 0; k < dims.inner; k++) {
+        const d = dc[i * dims.cols + j];
+        da[transposeA ? k * dims.rows + i : i * dims.inner + k] +=
+          d * entryB(b, dims, transposeB, k, j);
+        db[transposeB ? j * dims.inner + k : k * dims.cols + j] +=
+          d * entryA(a, dims, transposeA, i, k);
+      }
+  return [Float32Array.from(da), Float32Array.from(db)];
+}

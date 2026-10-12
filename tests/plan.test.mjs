@@ -87,6 +87,59 @@ test("a broadcast operand that holds the other operand's place breaks the chain,
   });
 });
 
+test("a dense layer, matmul then bias then relu, is one dispatch", async () => {
+  await onFakeGpu(async (device) => {
+    const x = device.tensor(new Float32Array(64 * 784), { shape: [64, 784] });
+    const w = device.tensor(new Float32Array(784 * 128), { shape: [784, 128] });
+    const bias = vector(device, new Float32Array(128));
+    await x.matmul(w).add(bias).relu().data();
+    // `matmul` reads its inputs at any index, which is no fact against a fuse: only an array
+    // that one call wrote and a later call reads must be read at `i` (F3). The output of `matmul`
+    // is written at `i` and read at `i` by `addExpand`, and the bias is only read.
+    assert.deepEqual(device.lastReport, {
+      tier: "webgpu",
+      dispatches: 1,
+      submissions: 1,
+      groups: [{ calls: ["matmul", "addExpand", "relu"], fused: true }],
+    });
+  });
+});
+
+test("a reduction runs over fewer elements than the call before it, which is a dispatch of its own (F2)", async () => {
+  await onFakeGpu(async (device) => {
+    const x = device.tensor(new Float32Array(6 * 4), { shape: [6, 4] });
+    await x.relu().sum(1).data();
+    assert.equal(device.lastReport.dispatches, 2);
+    assert.deepEqual(device.lastReport.groups, [
+      { calls: ["relu"], fused: false },
+      {
+        calls: ["sumAxis"],
+        fused: false,
+        why: "relu and sumAxis run as two dispatches because the trip counts differ (24 and 6)",
+      },
+    ]);
+  });
+});
+
+test("a matmul reads the array before it through an index, so it stands apart from the call that wrote it (F3)", async () => {
+  await onFakeGpu(async (device) => {
+    const x = device.tensor(new Float32Array(6 * 4), { shape: [6, 4] });
+    const w = device.tensor(new Float32Array(4 * 4), { shape: [4, 4] });
+    // The same trip count, 24: the output of `relu` is read as `a[ai]`, and not as `a[i]`.
+    await x.relu().matmul(w).data();
+    const report = device.lastReport;
+    assert.equal(report.dispatches, 2);
+    assert.deepEqual(
+      report.groups.map((group) => group.calls),
+      [["relu"], ["matmul"]],
+    );
+    assert.match(
+      report.groups[1].why,
+      /^relu and matmul run as two dispatches because matmul reads `a\[ai\]` \(line \d+\)$/,
+    );
+  });
+});
+
 test("a diamond computes its shared node once, in one dispatch", async () => {
   await onFakeGpu(async (device) => {
     const a = vector(device, [2, 1, 3]);

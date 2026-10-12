@@ -10,11 +10,18 @@ import {
   DERIVATIVES,
   EDGES,
   MAPS,
+  REDUCTIONS,
   SCALED_MAPS,
+  axisLayout,
   binaryGradReference,
   binaryReference,
   broadcastShape,
   f32,
+  matmulGradReference,
+  matmulReference,
+  matmulShape,
+  reduceGradReference,
+  reduceReference,
   sizeOf,
   values,
 } from "./_reference.mjs";
@@ -379,5 +386,200 @@ export function elementwiseCases() {
     ...mapGradientCases(),
     ...binaryGradientCases(),
     ...repeatedOperandCases(),
+  ];
+}
+
+// ─── reductions and matmul ────────────────────────────────────────────────────────────────────
+
+/** Shapes and axes a reduction runs over: every axis, and each axis of rank 1, 2 and 3. */
+const REDUCE_AXES = [
+  [[5], undefined],
+  [[5], 0],
+  [[3, 4], undefined],
+  [[3, 4], 0],
+  [[3, 4], 1],
+  [[3, 4], -1],
+  [[2, 3, 4], 0],
+  [[2, 3, 4], 1],
+  [[2, 3, 4], 2],
+  [[1, 1, 5], 1],
+];
+
+/** @returns {Case[]} */
+function reductionCases() {
+  const cases = [];
+  for (const [op, spec] of Object.entries(REDUCTIONS)) {
+    for (const [shape, axis] of REDUCE_AXES) {
+      // `argMax()` and `argMin()` take axis 0 by default: they reduce no more than one axis.
+      if (axis === undefined && op.startsWith("arg")) continue;
+      const x = values(nextSeed(), sizeOf(shape), ...spec.range);
+      cases.push({
+        name: `reduction ${op}, shape [${shape}], axis ${axis}`,
+        tolerance: spec.tolerance,
+        gpuTolerance: spec.gpu ?? spec.tolerance,
+        run: async (_nn, device) => ({
+          actual: await device.tensor(x, { shape })[op](axis).data(),
+          expected: reduceReference(op, shape, x, axis),
+        }),
+      });
+    }
+  }
+  // The first of equal elements wins an arg-max and an arg-min.
+  const ties = Float32Array.from([1, 3, 3, 2, 3, 0, 0, 5, 5, 5]);
+  for (const [op, expected] of [
+    ["argMax", [1, 2]],
+    ["argMin", [0, 0]],
+  ])
+    cases.push({
+      name: `reduction ${op} with ties`,
+      tolerance: 0,
+      gpuTolerance: 0,
+      run: async (_nn, device) => ({
+        actual: await device
+          .tensor(ties, { shape: [2, 5] })
+          [op](1)
+          .data(),
+        expected,
+      }),
+    });
+  return cases;
+}
+
+/** @returns {Case[]} */
+function reductionGradientCases() {
+  const cases = [];
+  for (const op of ["sum", "mean"]) {
+    for (const [shape, axis] of REDUCE_AXES) {
+      const x = values(nextSeed(), sizeOf(shape), -3, 3);
+      const outShape = axisLayout(shape, axis).outShape;
+      const dy = values(nextSeed(), sizeOf(outShape), -2, 2);
+      cases.push({
+        name: `gradient of ${op}, shape [${shape}], axis ${axis}`,
+        tolerance: 0,
+        gpuTolerance: 1e-5,
+        run: async (nn, device) => {
+          const input = device.tensor(x, { shape });
+          const [gradient] = nn.gradients(
+            input[op](axis),
+            [input],
+            device.tensor(dy, { shape: outShape }),
+          );
+          return {
+            actual: await gradient.data(),
+            expected: reduceGradReference(op, shape, dy, axis),
+          };
+        },
+      });
+    }
+  }
+  return cases;
+}
+
+/** [a shape, b shape, transposeA, transposeB]: a matrix is stored transposed where it is flagged. */
+const MATMULS = [
+  [[2, 3], [3, 4], false, false],
+  [[3, 2], [3, 4], true, false],
+  [[2, 3], [4, 3], false, true],
+  [[3, 2], [4, 3], true, true],
+  [[1, 1], [1, 1], false, false],
+  [[1, 5], [5, 1], false, false],
+  [[5, 1], [1, 5], false, false],
+  [[17, 33], [33, 9], false, false],
+  [[33, 17], [9, 33], true, true],
+  [[64, 100], [100, 32], false, false],
+];
+
+/** @returns {Case[]} */
+function matmulCases() {
+  const cases = [];
+  for (const [aShape, bShape, transposeA, transposeB] of MATMULS) {
+    const label = `[${aShape}] x [${bShape}]${transposeA ? ", transposeA" : ""}${transposeB ? ", transposeB" : ""}`;
+    const a = values(nextSeed(), sizeOf(aShape), -2, 2);
+    const b = values(nextSeed(), sizeOf(bShape), -2, 2);
+    cases.push({
+      name: `matmul ${label}`,
+      tolerance: 0,
+      gpuTolerance: 1e-5,
+      run: async (_nn, device) => ({
+        actual: await device
+          .tensor(a, { shape: aShape })
+          .matmul(device.tensor(b, { shape: bShape }), {
+            transposeA,
+            transposeB,
+          })
+          .data(),
+        expected: matmulReference(a, aShape, b, bShape, transposeA, transposeB),
+      }),
+    });
+    const dims = matmulShape(aShape, bShape, transposeA, transposeB);
+    const dc = values(nextSeed(), dims.rows * dims.cols, -2, 2);
+    const [expectedA, expectedB] = matmulGradReference(
+      a,
+      aShape,
+      b,
+      bShape,
+      transposeA,
+      transposeB,
+      dc,
+    );
+    for (const [target, expected] of [
+      ["a", expectedA],
+      ["b", expectedB],
+    ])
+      cases.push({
+        name: `gradient of matmul ${label} with respect to ${target}`,
+        tolerance: 1e-5,
+        gpuTolerance: 1e-5,
+        run: async (nn, device) => {
+          const x = device.tensor(a, { shape: aShape });
+          const y = device.tensor(b, { shape: bShape });
+          const out = x.matmul(y, { transposeA, transposeB });
+          const [gradient] = nn.gradients(
+            out,
+            [target === "a" ? x : y],
+            device.tensor(dc, { shape: [dims.rows, dims.cols] }),
+          );
+          return { actual: await gradient.data(), expected };
+        },
+      });
+  }
+  return cases;
+}
+
+/** An MLP layer, `relu(x w + bias)`, and the gradient of its mean with respect to w. */
+function layerCases() {
+  const [x, w, bias] = [
+    values(nextSeed(), 12 * 20, -1, 1),
+    values(nextSeed(), 20 * 7, -1, 1),
+    values(nextSeed(), 7, -1, 1),
+  ];
+  return [
+    {
+      name: "matmul, add a bias, relu",
+      tolerance: 0,
+      gpuTolerance: 1e-5,
+      run: async (_nn, device) => {
+        const y = device
+          .tensor(x, { shape: [12, 20] })
+          .matmul(device.tensor(w, { shape: [20, 7] }))
+          .add(device.tensor(bias, { shape: [7] }))
+          .relu();
+        const product = matmulReference(x, [12, 20], w, [20, 7]);
+        return {
+          actual: await y.data(),
+          expected: product.map((v, i) => Math.max(f32(v + bias[i % 7]), 0)),
+        };
+      },
+    },
+  ];
+}
+
+export function reductionAndMatmulCases() {
+  seed = 2000;
+  return [
+    ...reductionCases(),
+    ...reductionGradientCases(),
+    ...matmulCases(),
+    ...layerCases(),
   ];
 }
