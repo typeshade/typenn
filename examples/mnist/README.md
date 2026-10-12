@@ -10,14 +10,24 @@ The IDX gzip files are downloaded from the Google-hosted MNIST mirror on first u
 Pixels are normalized per batch while the dataset remains in its compact uint8 form.
 Only each active batch is copied into a TypeNN Tensor.
 
-Run this TypeScript example in a runtime that supports `fetch` and
-`DecompressionStream("gzip")` after building TypeNN:
+`model.ts` is the network, `loop.ts` is the training loop as a function, `train()`, and
+`train.ts` is the script that downloads the data and calls it. Run the script in a runtime
+that supports `fetch` and `DecompressionStream("gzip")` after building TypeNN (`npm run build`).
+It is TypeScript, so `tsx` runs it:
 
 ```sh
 npx tsx examples/mnist/train.ts
+MNIST_DEVICE=cpu MNIST_STEPS=40 MNIST_TEST_SAMPLES=1000 npx tsx examples/mnist/train.ts
 ```
 
-The optimizer currently keeps Adam moments on the CPU and applies parameter updates
-through Tensor's host parameter storage. Forward and backward Tensor operations use
-the selected TypeShade device. This path demonstrates the API and is not yet a
-throughput-tuned training loop.
+`MNIST_DEVICE` is `auto` (WebGPU, else the CPU tier), `webgpu`, `webgl2` or `cpu`.
+`MNIST_STEPS` stops after that many training steps, and `MNIST_TEST_SAMPLES` evaluates on
+that many test images. The tests run `train()` on the CPU tier in Node (`tests/mnist.test.mjs`)
+and on a WebGPU device in Chromium (`tests/gpu/gpu.test.mjs`), on synthetic data of the same
+shape.
+
+Every `data()` of a step runs as one TypeShade `fuse` scope, so `device.lastReport` says what the
+plan of the last one was: the dispatches, the submissions and which kernel functions share a
+dispatch. The optimizer keeps Adam moments on the CPU and applies parameter updates through
+Tensor's host parameter storage, and reads the gradients of all parameters in one plan.
+This path demonstrates the API and is not a throughput-tuned training loop.

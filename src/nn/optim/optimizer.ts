@@ -27,9 +27,13 @@ export abstract class Optimizer {
 
   abstract step(): Promise<void>;
 
-  protected async gradient(parameter: Tensor): Promise<Float32Array> {
-    if (!parameter.grad)
-      throw new Error("Call backward() before optimizer.step().");
-    return parameter.grad.data();
+  /** The gradient of each parameter, read in one plan. */
+  protected async gradients(): Promise<Float32Array[]> {
+    const gradients = this.parameters.map((parameter) => {
+      if (!parameter.grad)
+        throw new Error("Call backward() before optimizer.step().");
+      return parameter.grad;
+    });
+    return this.parameters[0]!.device.materializeAll(gradients);
   }
 }

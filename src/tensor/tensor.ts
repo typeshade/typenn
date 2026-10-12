@@ -1,3 +1,4 @@
+import type { Resident } from "typeshade/runtime";
 import type { Device } from "../runtime/device.js";
 import type { Shape } from "./shape.js";
 import { topologicalOrder } from "../autograd/graph.js";
@@ -22,21 +23,18 @@ import {
 import { softmaxCrossEntropyWithLogits } from "./operations/loss.js";
 import { softmax } from "./operations/normalization.js";
 import { reduce } from "./operations/reductions.js";
-import { pool2d, pool2dGrad } from "./operations/spatial.js";
 import { reshape } from "./operations/shape.js";
+import { pool2d, pool2dGrad } from "./operations/spatial.js";
 import type { Conv2DOptions, Pool2DOptions } from "./spatial.js";
 
 export type { Conv2DOptions, Pool2DOptions } from "./spatial.js";
 
-interface ResidentValue {
-  read(): Promise<Float32Array>;
-  destroy(): void;
-}
-
-type TensorStorage = Float32Array | ResidentValue;
-
 export class Tensor {
-  private materialized?: TensorStorage;
+  /**
+   * @internal The resident array that holds the value. A plan makes it when it computes the
+   * tensor, and the first plan that reads a tensor the caller made uploads it.
+   */
+  storage?: Resident<Float32Array>;
   private disposed = false;
 
   /** @internal */
@@ -45,9 +43,7 @@ export class Tensor {
     readonly shape: Shape,
     /** @internal */ readonly node: TensorNode,
     readonly requiresGrad = false,
-  ) {
-    if (node.kind === "input") this.materialized = node.value;
-  }
+  ) {}
 
   grad?: Tensor;
 
@@ -280,7 +276,7 @@ export class Tensor {
     this.grad = undefined;
   }
 
-  /** @internal Update a parameter leaf and invalidate its resident GPU value. */
+  /** @internal Update a parameter leaf, and the resident array that holds its value. */
   async assign(values: ArrayLike<number>): Promise<void> {
     this.assertUsable();
     if (!this.requiresGrad || this.node.kind !== "input")
@@ -290,7 +286,7 @@ export class Tensor {
     if (values.length !== this.node.value.length)
       throw new RangeError("Parameter assignment must preserve tensor size.");
     this.node.value.set(values);
-    await this.device.invalidate(this);
+    this.storage?.write(this.node.value);
   }
 
   /** @internal Host view used by the initial optimizer implementation. */
@@ -304,16 +300,6 @@ export class Tensor {
     if (this.disposed) return;
     this.disposed = true;
     await this.device.release(this);
-  }
-
-  /** @internal */
-  setMaterialized(value: TensorStorage | undefined): void {
-    this.materialized = value;
-  }
-
-  /** @internal */
-  getMaterialized(): TensorStorage | undefined {
-    return this.materialized;
   }
 
   /** @internal */

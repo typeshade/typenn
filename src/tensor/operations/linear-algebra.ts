@@ -1,8 +1,13 @@
+import {
+  conv2d as conv2dKernel,
+  conv2dFilterGrad,
+  conv2dInputGrad,
+} from "../../kernels/conv.shade.ts";
+import { matmul as matmulKernel } from "../../kernels/matmul.shade.ts";
 import { sameShape } from "../shape.js";
 import type { Tensor } from "../tensor.js";
-import type { Conv2DOptions } from "../spatial.js";
-import { spatialWindow } from "../spatial.js";
-import { assertCompatible } from "./common.js";
+import { spatialWindow, type Conv2DOptions } from "../spatial.js";
+import { assertCompatible, operation } from "./common.js";
 
 export interface MatmulOptions {
   readonly transposeA?: boolean;
@@ -29,19 +34,27 @@ export function matmul(
       `matmul inner dimensions must match; got ${inner} and ${otherInner}.`,
     );
 
-  return a.device.createOperation([rows, columns], {
-    kind: "matmul",
-    a,
-    b,
-    inner,
-    transposeA,
-    transposeB,
-  });
+  return operation(
+    [rows, columns],
+    "matmul",
+    matmulKernel,
+    [a, b],
+    [rows, inner, columns, transposeA ? 1 : 0, transposeB ? 1 : 0],
+    (upstream) => [
+      transposeA
+        ? b.matmul(upstream, { transposeA: transposeB, transposeB: true })
+        : upstream.matmul(b, { transposeB: !transposeB }),
+      transposeB
+        ? upstream.matmul(a, { transposeA: true, transposeB: transposeA })
+        : a.matmul(upstream, { transposeA: !transposeA }),
+    ],
+  );
 }
 
 interface Conv2dMetadata {
-  readonly input: Tensor;
-  readonly filter: Tensor;
+  readonly batch: number;
+  readonly height: number;
+  readonly width: number;
   readonly inputChannels: number;
   readonly kernelHeight: number;
   readonly kernelWidth: number;
@@ -58,7 +71,7 @@ function conv2dMetadata(
   input: Tensor,
   filter: Tensor,
   options: Conv2DOptions,
-): Conv2dMetadata & { readonly batch: number } {
+): Conv2dMetadata {
   if (input.shape.length !== 4 || filter.shape.length !== 4)
     throw new RangeError(
       "conv2d expects NHWC input [batch, height, width, channels] and HWIO filter.",
@@ -84,9 +97,9 @@ function conv2dMetadata(
     "conv2d",
   );
   return {
-    input,
-    filter,
     batch,
+    height,
+    width,
     inputChannels,
     kernelHeight,
     kernelWidth,
@@ -106,16 +119,27 @@ export function conv2d(
   options: Conv2DOptions = {},
 ): Tensor {
   assertCompatible(input, filter);
-  const metadata = conv2dMetadata(input, filter, options);
-  const { batch, ...nodeMetadata } = metadata;
-  return input.device.createOperation(
+  const m = conv2dMetadata(input, filter, options);
+  return operation(
+    [m.batch, m.outputHeight, m.outputWidth, m.outputChannels],
+    "conv2d",
+    conv2dKernel,
+    [input, filter],
     [
-      batch,
-      metadata.outputHeight,
-      metadata.outputWidth,
-      metadata.outputChannels,
+      m.height,
+      m.width,
+      m.inputChannels,
+      m.kernelHeight,
+      m.kernelWidth,
+      m.outputChannels,
+      m.outputHeight,
+      m.outputWidth,
+      m.strideY,
+      m.strideX,
+      m.padTop,
+      m.padLeft,
     ],
-    { kind: "conv2d", ...nodeMetadata },
+    (upstream) => conv2dGradients(input, filter, upstream, options),
   );
 }
 
@@ -127,31 +151,52 @@ export function conv2dGradients(
 ): readonly [Tensor, Tensor] {
   assertCompatible(input, filter);
   assertCompatible(input, dy);
-  const metadata = conv2dMetadata(input, filter, options);
+  const m = conv2dMetadata(input, filter, options);
   const expectedShape = [
-    metadata.batch,
-    metadata.outputHeight,
-    metadata.outputWidth,
-    metadata.outputChannels,
+    m.batch,
+    m.outputHeight,
+    m.outputWidth,
+    m.outputChannels,
   ];
   if (!sameShape(expectedShape, dy.shape))
     throw new RangeError(
       `conv2d output gradient shape must be [${expectedShape.join(", ")}].`,
     );
-
-  const { batch: _batch, ...nodeMetadata } = metadata;
+  const window = [m.strideY, m.strideX, m.padTop, m.padLeft];
   return [
-    input.device.createOperation(input.shape, {
-      kind: "conv2dGrad",
-      op: "conv2dInputGrad",
-      ...nodeMetadata,
-      dy,
-    }),
-    input.device.createOperation(filter.shape, {
-      kind: "conv2dGrad",
-      op: "conv2dFilterGrad",
-      ...nodeMetadata,
-      dy,
-    }),
+    operation(
+      input.shape,
+      "conv2dGrad",
+      conv2dInputGrad,
+      [filter, dy],
+      [
+        m.height,
+        m.width,
+        m.inputChannels,
+        m.kernelHeight,
+        m.kernelWidth,
+        m.outputChannels,
+        m.outputHeight,
+        m.outputWidth,
+        ...window,
+      ],
+    ),
+    operation(
+      filter.shape,
+      "conv2dGrad",
+      conv2dFilterGrad,
+      [input, dy],
+      [
+        m.batch,
+        m.height,
+        m.width,
+        m.inputChannels,
+        m.kernelWidth,
+        m.outputChannels,
+        m.outputHeight,
+        m.outputWidth,
+        ...window,
+      ],
+    ),
   ];
 }

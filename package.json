@@ -13,14 +13,17 @@
   },
   "devDependencies": {
     "esbuild": "^0.25.0",
+    "playwright-core": "1.56.1",
     "prettier": "^3.9.10",
     "typescript": "^5.6.3",
-    "typeshade": "https://github.com/typeshade/typeshade/archive/946b0ea7640a397fff53c4481dbf6d26c254d8af.tar.gz",
+    "typeshade": "https://github.com/typeshade/typeshade/archive/5fb79c7e03118fddb3d43c02005770dc59c25e6a.tar.gz",
     "vite": "^6.0.0"
   },
   "scripts": {
     "build": "node scripts/build.mjs",
     "lint": "node scripts/lint.mjs",
+    "test": "npm run build && node --test tests/*.test.mjs",
+    "test:gpu": "npm run build && node --test tests/gpu/*.test.mjs",
     "prepack": "npm run build"
   },
   "files": [

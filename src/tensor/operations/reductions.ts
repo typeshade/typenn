@@ -1,6 +1,29 @@
+import {
+  argMaxAxis,
+  argMinAxis,
+  maxAxis,
+  meanAxis,
+  minAxis,
+  prodAxis,
+  reduceGrad,
+  sumAxis,
+} from "../../kernels/reduce.shade.ts";
+import type { Kernel } from "../node.js";
 import { sizeOf } from "../shape.js";
-import type { ReductionOperation } from "../nodes/reduce.js";
 import type { Tensor } from "../tensor.js";
+import { operation } from "./common.js";
+
+const REDUCTIONS = {
+  sum: sumAxis,
+  mean: meanAxis,
+  prod: prodAxis,
+  max: maxAxis,
+  min: minAxis,
+  argMax: argMaxAxis,
+  argMin: argMinAxis,
+} satisfies Record<string, Kernel>;
+
+export type ReductionOperation = keyof typeof REDUCTIONS;
 
 export function reduce(
   input: Tensor,
@@ -17,24 +40,37 @@ export function reduce(
     normalizedAxis === undefined
       ? []
       : input.shape.filter((_, index) => index !== normalizedAxis);
+  // The input is [outer, axisSize, inner] and the output [outer, inner].
   const axisSize =
     normalizedAxis === undefined
       ? sizeOf(input.shape)
       : input.shape[normalizedAxis]!;
-  return input.device.createOperation(outputShape, {
-    kind: "reduce",
+  const inner =
+    normalizedAxis === undefined
+      ? 1
+      : sizeOf(input.shape.slice(normalizedAxis + 1));
+  return operation(
+    outputShape,
     op,
-    input,
-    outer:
-      normalizedAxis === undefined
-        ? 1
-        : sizeOf(input.shape.slice(0, normalizedAxis)),
-    axisSize,
-    inner:
-      normalizedAxis === undefined
-        ? 1
-        : sizeOf(input.shape.slice(normalizedAxis + 1)),
-  });
+    REDUCTIONS[op],
+    [input],
+    [axisSize, inner],
+    (upstream) => {
+      if (op !== "sum" && op !== "mean")
+        throw new Error(
+          `Autograd for ${op} reductions is not implemented yet.`,
+        );
+      return [
+        operation(
+          input.shape,
+          "reduceGrad",
+          reduceGrad,
+          [upstream],
+          [axisSize, inner, op === "mean" ? 1 / axisSize : 1],
+        ),
+      ];
+    },
+  );
 }
 
 function normalizeAxis(

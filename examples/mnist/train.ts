@@ -1,64 +1,19 @@
-import * as nn from "typenn";
-import { DataLoader, loadMNIST } from "./data.js";
-import { SimpleMLP } from "./model.js";
+import { loadMNIST } from "./data.js";
+import { train } from "./loop.js";
 
-const batchSize = 64;
-const epochs = 5;
-const device = await nn.device({ device: "auto" });
-const model = new SimpleMLP().to(device);
-const parameters = model.parameters();
-const criterion = new nn.CrossEntropyLoss();
-const optimizer = nn.optim.Adam(parameters, { lr: 0.001 });
+// The environment of Node, Bun and Deno.
+declare const process: { env: Record<string, string | undefined> };
 
-try {
-  const trainData = await loadMNIST(true);
-  const testData = await loadMNIST(false);
+// The MNIST script: download the IDX files, train for five epochs, and print the test accuracy.
+// MNIST_STEPS=20 stops after 20 training steps, MNIST_TEST_SAMPLES=1000 evaluates on the first
+// 1,000 test images, and MNIST_DEVICE=cpu|webgpu|webgl2 picks the tier.
+const steps = process.env.MNIST_STEPS;
+const testSamples = process.env.MNIST_TEST_SAMPLES;
+const device = process.env.MNIST_DEVICE;
 
-  for (let epoch = 1; epoch <= epochs; epoch++) {
-    model.train();
-    let totalLoss = 0;
-    let totalSamples = 0;
-    for await (const batch of new DataLoader(trainData, batchSize, true)) {
-      await optimizer.zeroGrad();
-      const images = device.tensor(batch.images, {
-        shape: [batch.size, 1, 28, 28],
-      });
-      const logits = model.forward(images);
-      const loss = criterion.forward(logits, batch.labels);
-      const [batchLoss] = await loss.data();
-      await loss.backward();
-      await optimizer.step();
-      totalLoss += batchLoss! * batch.size;
-      totalSamples += batch.size;
-      await loss.disposeGraph(parameters);
-    }
-    console.log(
-      `Epoch ${epoch}/${epochs}, loss ${(totalLoss / totalSamples).toFixed(4)}`,
-    );
-  }
-
-  model.eval();
-  let correct = 0;
-  let total = 0;
-  for await (const batch of new DataLoader(testData, batchSize, false)) {
-    const images = device.tensor(batch.images, {
-      shape: [batch.size, 1, 28, 28],
-    });
-    const logits = model.forward(images);
-    const values = await logits.data();
-    for (let row = 0; row < batch.size; row++) {
-      let predicted = 0;
-      for (let digit = 1; digit < 10; digit++) {
-        if (values[row * 10 + digit]! > values[row * 10 + predicted]!)
-          predicted = digit;
-      }
-      if (predicted === batch.labels[row]) correct++;
-    }
-    total += batch.size;
-    await logits.disposeGraph(parameters);
-  }
-  console.log(`Test accuracy ${((100 * correct) / total).toFixed(2)}%`);
-} finally {
-  await optimizer.zeroGrad();
-  await device.dispose();
-}
+await train(await loadMNIST(true), await loadMNIST(false), {
+  ...(steps ? { steps: Number(steps) } : {}),
+  ...(testSamples ? { testSamples: Number(testSamples) } : {}),
+  ...(device ? { device: device as "cpu" | "webgpu" | "webgl2" } : {}),
+  log: console.log,
+});

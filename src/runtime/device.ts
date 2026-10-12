@@ -1,23 +1,22 @@
-import { configure, type Resident, type Runtime } from "typeshade/runtime";
+import {
+  configure,
+  createRuntime,
+  resident,
+  type Resident,
+  type Runtime,
+} from "typeshade/runtime";
+import type { FuseReport } from "typeshade/fuse";
 import { checkedShape, sizeOf, type Shape } from "../tensor/shape.js";
-import type { TensorNode } from "../tensor/node.js";
-import type { Operation } from "./kernel-registry.js";
+import type { OpNode } from "../tensor/node.js";
 import { Tensor } from "../tensor/tensor.js";
-import { evaluateCpu } from "./cpu-executor.js";
-import { DeviceBuffers } from "./device-buffers.js";
-import { GpuGraphExecutor } from "./gpu-graph-executor.js";
-import { preparePipelines } from "./device-pipelines.js";
-import { isDevicePreference, selectRuntime } from "./device-runtime.js";
-import { runLinearTraining } from "./linear-training-executor.js";
+import { execute, type Memory } from "./execute.js";
 import type {
   BackendInfo,
   DeviceOptions,
   DevicePreference,
   ExecutionTier,
-  LinearTrainingCommand,
 } from "./device-types.js";
 
-export type { LinearTrainingEntry } from "./kernel-registry.js";
 export type {
   BackendInfo,
   DeviceOptions,
@@ -26,37 +25,39 @@ export type {
 } from "./device-types.js";
 
 // TypeShade's direct call-layer configuration is process-global. A single active device keeps
-// selection and resident ownership predictable; the GPU path itself uses an owned Runtime/Frame.
+// selection and resident ownership predictable.
 let activeDevice: Device | undefined;
+
+/** How many reports of plans `Device.reports` keeps. */
+const REPORT_HISTORY = 256;
 
 export class Device {
   readonly backend: BackendInfo;
-  private readonly buffers = new DeviceBuffers();
-  private readonly pipelines: Map<Operation, unknown>;
-  private readonly gpuExecutor?: GpuGraphExecutor;
-  private readonly pendingMaterializations = new WeakMap<
-    Tensor,
-    Promise<Float32Array>
-  >();
-  private readonly pendingExecutions = new Set<Promise<Float32Array>>();
+  private readonly live = new Set<Resident<Float32Array>>();
+  private readonly pending = new Set<Promise<unknown>>();
+  private readonly history: FuseReport[] = [];
+  private readonly memory: Memory = {
+    keep: (values) => {
+      const array = resident(values);
+      this.live.add(array);
+      return array;
+    },
+    drop: (array) => {
+      this.live.delete(array);
+      array.destroy();
+    },
+    record: (report) => {
+      this.history.push(report);
+      if (this.history.length > REPORT_HISTORY) this.history.shift();
+    },
+  };
   private runtime?: Runtime;
   private disposed = false;
   private disposing = false;
 
-  private constructor(
-    backend: BackendInfo,
-    runtime?: Runtime,
-    pipelines: ReadonlyMap<Operation, unknown> = new Map(),
-  ) {
+  private constructor(backend: BackendInfo, runtime?: Runtime) {
     this.backend = backend;
     this.runtime = runtime;
-    this.pipelines = new Map(pipelines);
-    if (runtime)
-      this.gpuExecutor = new GpuGraphExecutor(
-        runtime,
-        this.pipelines,
-        this.buffers,
-      );
   }
 
   static async open(options: DeviceOptions = {}): Promise<Device> {
@@ -65,42 +66,69 @@ export class Device {
       throw new TypeError(
         `Unknown TypeNN device preference: ${String(preference)}.`,
       );
+    if (
+      options.gpuDevice !== undefined &&
+      (preference === "cpu" || preference === "webgl2")
+    )
+      throw new TypeError(
+        `The gpuDevice option is a GPUDevice, which the ${preference} device does not use.`,
+      );
     if (activeDevice && !activeDevice.isDisposed())
       throw new Error(
         "TypeNN currently supports one active Device per JavaScript context.",
       );
 
-    const { runtime, fallbackReason } = await selectRuntime(preference);
-
-    if (runtime) {
-      configure({ runtime });
-      try {
-        const pipelines = await preparePipelines(runtime);
-        const device = new Device(
-          {
-            provider: "typeshade",
-            name: runtime.tier,
-            ...(fallbackReason ? { fallbackReason } : {}),
-          },
-          runtime,
-          pipelines,
-        );
-        activeDevice = device;
-        return device;
-      } catch (error) {
-        runtime.destroy();
-        configure({ prefer: ["webgpu", "webgl2", "cpu"], runtime: null });
-        throw error;
-      }
+    const { runtime, fallbackReason } = await selectRuntime(
+      preference,
+      options.gpuDevice,
+    );
+    const name: ExecutionTier = runtime?.tier ?? "cpu";
+    try {
+      // The kernel functions run on the first tier of `prefer` that can run them. An explicit
+      // WebGPU device is required to run them all there; the other tiers list the CPU tier last
+      // for the calls they cannot run, such as the ones that take an array of strides.
+      configure({ runtime: name === "webgpu" ? runtime! : null });
+      configure({
+        prefer:
+          name === "cpu"
+            ? ["cpu"]
+            : name === "webgl2"
+              ? ["webgl2", "cpu"]
+              : preference === "auto"
+                ? ["webgpu", "cpu"]
+                : ["webgpu"],
+      });
+    } catch (error) {
+      runtime?.destroy();
+      resetConfiguration();
+      throw error;
     }
-    if (!runtime) configure({ prefer: ["cpu"], runtime: null });
-    const device = new Device({
-      provider: "typeshade",
-      name: "cpu",
-      ...(fallbackReason ? { fallbackReason } : {}),
-    });
+    // On WebGL2 the calls make a context of their own.
+    if (name === "webgl2") runtime!.destroy();
+    const device = new Device(
+      {
+        provider: "typeshade",
+        name,
+        ...(fallbackReason ? { fallbackReason } : {}),
+      },
+      name === "webgpu" ? runtime : undefined,
+    );
     activeDevice = device;
     return device;
+  }
+
+  /** The report of the last plan a `data()` ran, or undefined before the first. */
+  get lastReport(): FuseReport | undefined {
+    return this.history[this.history.length - 1];
+  }
+
+  /** The reports of the last 256 plans, oldest first. */
+  get reports(): readonly FuseReport[] {
+    return this.history;
+  }
+
+  clearReports(): void {
+    this.history.length = 0;
   }
 
   tensor(
@@ -130,98 +158,44 @@ export class Device {
     return new Tensor(this, shape, { kind: "input", value: values }, true);
   }
 
-  /** @internal Allocate a host buffer for CPU or a TypeShade resident for device execution. */
-  createKernelBuffer<T extends Float32Array | Uint32Array>(
-    initial: T,
-  ): T | Resident<T> {
-    this.assertUsable();
-    if (!this.runtime) return this.buffers.allocate(initial, false);
-    return this.buffers.allocate(initial, true);
-  }
-
-  /** @internal Replace a reusable CPU or resident input buffer. */
-  writeKernelBuffer<T extends Float32Array | Uint32Array>(
-    target: T | Resident<T>,
-    value: T,
-  ): void {
-    this.assertUsable();
-    this.buffers.write(target, value);
-  }
-
-  /** @internal Read a kernel buffer to host memory. */
-  async readKernelBuffer<T extends Float32Array | Uint32Array>(
-    target: T | Resident<T>,
-  ): Promise<T> {
-    this.assertUsable();
-    return this.buffers.read(target);
-  }
-
-  /** @internal Release a buffer allocated by createKernelBuffer. */
-  releaseKernelBuffer<T extends Float32Array | Uint32Array>(
-    target: T | Resident<T>,
-  ): void {
-    this.buffers.release(target);
-  }
-
-  /** @internal Run ordered training entries in one TypeShade frame, or on its CPU tier. */
-  async runLinearTrainingFrame(
-    commands: readonly LinearTrainingCommand[],
-  ): Promise<void> {
-    this.assertUsable();
-    await runLinearTraining(this.runtime, this.pipelines, commands);
-  }
-
   /** @internal */
-  createOperation(shape: Shape, node: TensorNode): Tensor {
+  createOperation(shape: Shape, node: OpNode): Tensor {
     this.assertUsable();
     return new Tensor(this, checkedShape(shape), node);
   }
 
   /** @internal */
   materialize(tensor: Tensor): Promise<Float32Array> {
+    return this.materializeAll([tensor]).then(([values]) => values!);
+  }
+
+  /** @internal Compute and read several tensors in one plan. */
+  materializeAll(tensors: readonly Tensor[]): Promise<Float32Array[]> {
     this.assertUsable();
-    const pending = this.pendingMaterializations.get(tensor);
-    if (pending) return pending;
-    const task = this.execute(tensor);
-    const tracked = task.finally(() => {
-      this.pendingMaterializations.delete(tensor);
-      this.pendingExecutions.delete(tracked);
-    });
-    this.pendingMaterializations.set(tensor, tracked);
-    this.pendingExecutions.add(tracked);
-    return tracked;
+    const task: Promise<Float32Array[]> = execute(tensors, this.memory).finally(
+      () => this.pending.delete(task),
+    );
+    this.pending.add(task);
+    return task;
   }
 
-  private async execute(tensor: Tensor): Promise<Float32Array> {
-    const existing = tensor.getMaterialized();
-    if (existing instanceof Float32Array) return existing.slice();
-    if (this.gpuExecutor) return this.gpuExecutor.execute(tensor);
-    const value = await evaluateCpu(tensor);
-    return value.slice();
-  }
-
-  /** @internal */
-  async release(tensor: Tensor): Promise<void> {
-    await this.pendingMaterializations.get(tensor)?.catch(() => undefined);
-    const value = tensor.getMaterialized();
-    if (value && !(value instanceof Float32Array))
-      this.buffers.release(value as Resident<Float32Array>);
-  }
-
-  /** @internal Drop a cached resident value after host-side parameter updates. */
-  async invalidate(tensor: Tensor): Promise<void> {
-    await this.release(tensor);
-    tensor.setMaterialized(undefined);
+  /** @internal Free the array of a tensor. */
+  release(tensor: Tensor): void {
+    const array = tensor.storage;
+    if (array === undefined) return;
+    tensor.storage = undefined;
+    this.memory.drop(array);
   }
 
   async dispose(): Promise<void> {
     if (this.disposed || this.disposing) return;
     this.disposing = true;
-    await Promise.allSettled([...this.pendingExecutions]);
+    await Promise.allSettled([...this.pending]);
     this.disposed = true;
-    this.buffers.dispose();
+    for (const array of this.live) array.destroy();
+    this.live.clear();
     this.runtime?.destroy();
-    configure({ prefer: ["webgpu", "webgl2", "cpu"], runtime: null });
+    resetConfiguration();
     if (activeDevice === this) activeDevice = undefined;
   }
 
@@ -234,6 +208,38 @@ export class Device {
   /** @internal */
   isDisposed(): boolean {
     return this.disposed;
+  }
+}
+
+/** The device and the order of tiers TypeShade's call layer has before a TypeNN device. */
+function resetConfiguration(): void {
+  configure({ runtime: null });
+  configure({});
+}
+
+function isDevicePreference(value: string): value is DevicePreference {
+  return ["auto", "webgpu", "webgl2", "cpu"].includes(value);
+}
+
+/** The program runtime that holds the device the calls run on, if the preference names a GPU. */
+async function selectRuntime(
+  preference: DevicePreference,
+  gpuDevice: object | undefined,
+): Promise<{ runtime?: Runtime; fallbackReason?: string }> {
+  if (preference === "cpu") return {};
+  try {
+    return {
+      runtime: await createRuntime(
+        gpuDevice !== undefined
+          ? { device: gpuDevice }
+          : { prefer: [preference === "auto" ? "webgpu" : preference] },
+      ),
+    };
+  } catch (error) {
+    if (preference !== "auto") throw error;
+    return {
+      fallbackReason: error instanceof Error ? error.message : String(error),
+    };
   }
 }
 

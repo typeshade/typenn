@@ -1,6 +1,11 @@
+import {
+  crossEntropyLabelsGrad,
+  crossEntropyLogitsGrad,
+  softmaxCrossEntropy,
+} from "../../kernels/loss.shade.ts";
 import { sameShape } from "../shape.js";
 import type { Tensor } from "../tensor.js";
-import { assertCompatible } from "./common.js";
+import { assertCompatible, operation } from "./common.js";
 
 export function softmaxCrossEntropyWithLogits(
   logits: Tensor,
@@ -18,13 +23,29 @@ export function softmaxCrossEntropyWithLogits(
       `Unknown softmaxCrossEntropyWithLogits reduction: ${String(reduction)}.`,
     );
   const [rows, columns] = logits.shape as readonly [number, number];
-  const perExample = logits.device.createOperation([rows], {
-    kind: "softmaxCrossEntropy",
-    logits,
-    labels,
-    rows,
-    columns,
-  });
+  const perExample = operation(
+    [rows],
+    "softmaxCrossEntropy",
+    softmaxCrossEntropy,
+    [logits, labels],
+    [columns],
+    (upstream) => [
+      operation(
+        logits.shape,
+        "softmaxCrossEntropyGrad",
+        crossEntropyLogitsGrad,
+        [logits, labels, upstream],
+        [columns],
+      ),
+      operation(
+        labels.shape,
+        "softmaxCrossEntropyGrad",
+        crossEntropyLabelsGrad,
+        [logits, upstream],
+        [columns],
+      ),
+    ],
+  );
   if (reduction === "none") return perExample;
   return reduction === "sum" ? perExample.sum() : perExample.mean();
 }

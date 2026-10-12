@@ -6,6 +6,7 @@ export {
   type DevicePreference,
   type ExecutionTier,
 } from "./runtime/device.js";
+export type { FuseReport } from "typeshade/fuse";
 // TypeShade autodiff is for pure Shade functions, not TypeNN Tensor graphs.
 export {
   grad as shadeGrad,

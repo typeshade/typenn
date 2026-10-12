@@ -12,15 +12,10 @@ async function filesIn(directory) {
   return files;
 }
 
-function removeTypeShadeDecorators(source) {
-  return source
-    .replace(/^@compute\([^\n]+\)\n/gm, "")
-    .replace(/@builtin\("global_invocation_id"\)\s*/g, "");
-}
-
 const sourceFiles = await filesIn("src");
 const scriptFiles = await filesIn("scripts");
 const exampleFiles = await filesIn("examples");
+const testFiles = await filesIn("tests");
 const configFiles = [
   "README.md",
   "TODO.md",
@@ -29,16 +24,18 @@ const configFiles = [
   "tsconfig.json",
   "vite.config.ts",
 ];
-const files = [...sourceFiles, ...scriptFiles, ...exampleFiles, ...configFiles];
+const files = [
+  ...sourceFiles,
+  ...scriptFiles,
+  ...exampleFiles,
+  ...testFiles,
+  ...configFiles,
+];
 const failures = [];
 
 for (const path of files) {
   const source = await readFile(path, "utf8");
-  const formattedSource = path.endsWith(".shade.ts")
-    ? removeTypeShadeDecorators(source)
-    : source;
-  if (!(await prettier.check(formattedSource, { filepath: path })))
-    failures.push(path);
+  if (!(await prettier.check(source, { filepath: path }))) failures.push(path);
 }
 
 if (failures.length > 0) {

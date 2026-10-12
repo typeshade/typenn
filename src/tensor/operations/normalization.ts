@@ -1,5 +1,12 @@
+import {
+  logSoftmax,
+  logSoftmaxGrad,
+  softmax as softmaxKernel,
+  softmaxGrad,
+} from "../../kernels/softmax.shade.ts";
 import { sizeOf } from "../shape.js";
 import type { Tensor } from "../tensor.js";
+import { operation } from "./common.js";
 
 export function softmax(
   input: Tensor,
@@ -20,14 +27,23 @@ export function softmax(
     throw new RangeError(
       `Axis ${axis} is out of range for rank-${input.shape.length} tensor.`,
     );
-
-  return input.device.createOperation(input.shape, {
-    kind: "softmax",
+  // The input is [outer, axisSize, inner].
+  const axisSize = input.shape[normalizedAxis]!;
+  const inner = sizeOf(input.shape.slice(normalizedAxis + 1));
+  return operation(
+    input.shape,
     op,
-    input,
-    axis: normalizedAxis,
-    outer: sizeOf(input.shape.slice(0, normalizedAxis)),
-    axisSize: input.shape[normalizedAxis]!,
-    inner: sizeOf(input.shape.slice(normalizedAxis + 1)),
-  });
+    op === "softmax" ? softmaxKernel : logSoftmax,
+    [input],
+    [axisSize, inner],
+    (upstream, value) => [
+      operation(
+        input.shape,
+        "softmaxGrad",
+        op === "softmax" ? softmaxGrad : logSoftmaxGrad,
+        [value, upstream],
+        [axisSize, inner],
+      ),
+    ],
+  );
 }
