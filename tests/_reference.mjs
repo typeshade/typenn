@@ -550,3 +550,209 @@ export function crossEntropyReference(logits, labels, rows, columns, dy) {
   }
   return { losses, gradientLogits, gradientLabels };
 }
+
+// ─── conv2d and pooling ───────────────────────────────────────────────────────────────────────
+
+/** The output size and the leading padding of one spatial axis, as TensorFlow works them out. */
+function axisWindow(size, filter, stride, padding) {
+  const out =
+    padding === "same"
+      ? Math.ceil(size / stride)
+      : Math.floor((size - filter) / stride) + 1;
+  const pad = Math.max((out - 1) * stride + filter - size, 0);
+  return { out, before: Math.floor(pad / 2) };
+}
+
+/** [stride, stride] from a number or a pair. */
+export const pair = (value, fallback) =>
+  typeof value === "number" ? [value, value] : (value ?? [fallback, fallback]);
+
+/** The geometry of a spatial operation on an NHWC input. */
+export function windowOf(shape, filterHeight, filterWidth, strides, padding) {
+  const [sy, sx] = pair(strides, 1);
+  const y = axisWindow(shape[1], filterHeight, sy, padding);
+  const x = axisWindow(shape[2], filterWidth, sx, padding);
+  return {
+    sy,
+    sx,
+    outHeight: y.out,
+    outWidth: x.out,
+    padTop: y.before,
+    padLeft: x.before,
+  };
+}
+
+/** Visit each (output element, tap) of a window: `visit(outIndex, inIndex, kernelY, kernelX)`
+ *  for the taps that fall inside the input, in the order the kernels scan them. */
+function eachTap(shape, filterHeight, filterWidth, window, channels, visit) {
+  const [batch, height, width] = shape;
+  for (let n = 0; n < batch; n++)
+    for (let oy = 0; oy < window.outHeight; oy++)
+      for (let ox = 0; ox < window.outWidth; ox++)
+        for (let c = 0; c < channels; c++)
+          for (let ky = 0; ky < filterHeight; ky++)
+            for (let kx = 0; kx < filterWidth; kx++) {
+              const iy = oy * window.sy + ky - window.padTop;
+              const ix = ox * window.sx + kx - window.padLeft;
+              if (iy < 0 || iy >= height || ix < 0 || ix >= width) continue;
+              visit(
+                ((n * window.outHeight + oy) * window.outWidth + ox) *
+                  channels +
+                  c,
+                ((n * height + iy) * width + ix) * shape[3] +
+                  (channels === shape[3] ? c : 0),
+                ky,
+                kx,
+                c,
+              );
+            }
+}
+
+export function conv2dReference(input, shape, filter, filterShape, options) {
+  const [kh, kw, inChannels, outChannels] = filterShape;
+  const window = windowOf(
+    shape,
+    kh,
+    kw,
+    options.strides,
+    options.padding ?? "valid",
+  );
+  const out = new Float32Array(
+    shape[0] * window.outHeight * window.outWidth * outChannels,
+  );
+  for (let n = 0; n < shape[0]; n++)
+    for (let oy = 0; oy < window.outHeight; oy++)
+      for (let ox = 0; ox < window.outWidth; ox++)
+        for (let o = 0; o < outChannels; o++) {
+          let total = 0;
+          for (let ky = 0; ky < kh; ky++)
+            for (let kx = 0; kx < kw; kx++) {
+              const iy = oy * window.sy + ky - window.padTop;
+              const ix = ox * window.sx + kx - window.padLeft;
+              if (iy < 0 || iy >= shape[1] || ix < 0 || ix >= shape[2])
+                continue;
+              for (let c = 0; c < inChannels; c++)
+                total = f32(
+                  total +
+                    f32(
+                      input[
+                        ((n * shape[1] + iy) * shape[2] + ix) * inChannels + c
+                      ] *
+                        filter[
+                          ((ky * kw + kx) * inChannels + c) * outChannels + o
+                        ],
+                    ),
+                );
+            }
+          out[
+            ((n * window.outHeight + oy) * window.outWidth + ox) * outChannels +
+              o
+          ] = total;
+        }
+  return {
+    out,
+    outShape: [shape[0], window.outHeight, window.outWidth, outChannels],
+  };
+}
+
+/** The gradients of conv2d with respect to the input and the filter, in double precision. */
+export function conv2dGradReference(
+  input,
+  shape,
+  filter,
+  filterShape,
+  options,
+  dy,
+) {
+  const [kh, kw, inChannels, outChannels] = filterShape;
+  const window = windowOf(
+    shape,
+    kh,
+    kw,
+    options.strides,
+    options.padding ?? "valid",
+  );
+  const dInput = new Float64Array(input.length);
+  const dFilter = new Float64Array(filter.length);
+  for (let n = 0; n < shape[0]; n++)
+    for (let oy = 0; oy < window.outHeight; oy++)
+      for (let ox = 0; ox < window.outWidth; ox++)
+        for (let o = 0; o < outChannels; o++) {
+          const d =
+            dy[
+              ((n * window.outHeight + oy) * window.outWidth + ox) *
+                outChannels +
+                o
+            ];
+          for (let ky = 0; ky < kh; ky++)
+            for (let kx = 0; kx < kw; kx++) {
+              const iy = oy * window.sy + ky - window.padTop;
+              const ix = ox * window.sx + kx - window.padLeft;
+              if (iy < 0 || iy >= shape[1] || ix < 0 || ix >= shape[2])
+                continue;
+              for (let c = 0; c < inChannels; c++) {
+                const inputAt =
+                  ((n * shape[1] + iy) * shape[2] + ix) * inChannels + c;
+                const filterAt =
+                  ((ky * kw + kx) * inChannels + c) * outChannels + o;
+                dInput[inputAt] += d * filter[filterAt];
+                dFilter[filterAt] += d * input[inputAt];
+              }
+            }
+        }
+  return [Float32Array.from(dInput), Float32Array.from(dFilter)];
+}
+
+export function poolReference(kind, input, shape, options) {
+  const [fh, fw] = pair(options.filterSize, 1);
+  const window = windowOf(
+    shape,
+    fh,
+    fw,
+    options.strides,
+    options.padding ?? "valid",
+  );
+  const channels = shape[3];
+  const size = shape[0] * window.outHeight * window.outWidth * channels;
+  const best = new Float32Array(size).fill(NaN);
+  const total = new Float32Array(size);
+  const count = new Float32Array(size);
+  eachTap(shape, fh, fw, window, channels, (out, at) => {
+    if (kind === "max") {
+      if (count[out] === 0 || input[at] > best[out]) best[out] = input[at];
+    } else total[out] = f32(total[out] + input[at]);
+    count[out] += 1;
+  });
+  return {
+    out: kind === "max" ? best : total.map((sum, i) => f32(sum / count[i])),
+    outShape: [shape[0], window.outHeight, window.outWidth, channels],
+  };
+}
+
+export function poolGradReference(kind, input, shape, options, dy) {
+  const [fh, fw] = pair(options.filterSize, 1);
+  const window = windowOf(
+    shape,
+    fh,
+    fw,
+    options.strides,
+    options.padding ?? "valid",
+  );
+  const channels = shape[3];
+  const gradient = new Float64Array(input.length);
+  const outputs = shape[0] * window.outHeight * window.outWidth * channels;
+  const winner = new Array(outputs).fill(-1);
+  const count = new Array(outputs).fill(0);
+  const taps = [];
+  eachTap(shape, fh, fw, window, channels, (out, at) => {
+    taps.push([out, at]);
+    count[out] += 1;
+    if (winner[out] < 0 || input[at] > input[winner[out]]) winner[out] = at;
+  });
+  for (const [out, at] of taps) {
+    if (kind === "max") {
+      if (winner[out] === at) gradient[at] += dy[out];
+    } else gradient[at] += dy[out] / count[out];
+  }
+  return Float32Array.from(gradient);
+}

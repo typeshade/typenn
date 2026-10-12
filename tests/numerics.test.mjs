@@ -4,6 +4,7 @@ import {
   elementwiseCases,
   reductionAndMatmulCases,
   softmaxAndLossCases,
+  spatialCases,
 } from "./_cases.mjs";
 import { closeNn, loadNn } from "./_nn.mjs";
 import { difference } from "./_reference.mjs";
@@ -26,6 +27,7 @@ for (const testCase of [
   ...elementwiseCases(),
   ...reductionAndMatmulCases(),
   ...softmaxAndLossCases(),
+  ...spatialCases(),
 ]) {
   if (testCase.cpuOnly && process.env.TYPENN_FAST) continue;
   test(testCase.name, async () => {

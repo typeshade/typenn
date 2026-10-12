@@ -140,6 +140,131 @@ test("a matmul reads the array before it through an index, so it stands apart fr
   });
 });
 
+/** The groups of a report with the line numbers left out of the reasons. */
+const outline = (report) =>
+  report.groups.map(({ calls, fused, why }) => ({
+    calls,
+    fused,
+    ...(why === undefined
+      ? {}
+      : { why: why.replace(/\(line \d+\)/, "(line N)") }),
+  }));
+
+/** The model of `examples/mnist`: Flatten, Linear 784 to 128, ReLU, Dropout 0.2, Linear 128 to 10. */
+function mnistStep(device) {
+  const model = new nn.Sequential(
+    new nn.Flatten(),
+    new nn.Linear(784, 128, { seed: 101 }),
+    new nn.ReLU(),
+    new nn.Dropout(0.2),
+    new nn.Linear(128, 10, { seed: 202 }),
+  ).to(device);
+  const images = device.tensor(new Float32Array(64 * 784), {
+    shape: [64, 1, 28, 28],
+  });
+  const labels = Array.from({ length: 64 }, (_, row) => row % 10);
+  const loss = new nn.CrossEntropyLoss().forward(model.forward(images), labels);
+  return { loss, parameters: model.parameters() };
+}
+
+test("the forward pass of the MNIST model is five dispatches in one submission", async () => {
+  await onFakeGpu(async (device) => {
+    const { loss } = mnistStep(device);
+    await loss.data();
+    // Where the number of elements changes, the trip counts differ and the next call stands apart
+    // (F2): 50,176 for the flatten (a copy), 8,192 for the first layer and the dropout, 640 for the
+    // second layer, 64 for the loss of each row, 1 for their mean. The layers themselves fuse:
+    // `matmul`, the bias, `relu` and the dropout mask are one dispatch.
+    assert.equal(device.lastReport.dispatches, 5);
+    assert.equal(device.lastReport.submissions, 1);
+    assert.deepEqual(outline(device.lastReport), [
+      { calls: ["copy"], fused: false },
+      {
+        calls: ["matmul", "addExpand", "relu", "mul"],
+        fused: true,
+        why: "copy and matmul run as two dispatches because the trip counts differ (50176 and 8192)",
+      },
+      {
+        calls: ["matmul", "addExpand"],
+        fused: true,
+        why: "mul and matmul run as two dispatches because the trip counts differ (8192 and 640)",
+      },
+      {
+        calls: ["softmaxCrossEntropy"],
+        fused: false,
+        why: "addExpand and softmaxCrossEntropy run as two dispatches because the trip counts differ (640 and 64)",
+      },
+      {
+        calls: ["meanAxis"],
+        fused: false,
+        why: "softmaxCrossEntropy and meanAxis run as two dispatches because the trip counts differ (64 and 1)",
+      },
+    ]);
+  });
+});
+
+test("the backward pass of the MNIST model is ten dispatches in four plans, one for each gradient", async () => {
+  await onFakeGpu(async (device) => {
+    const { loss, parameters } = mnistStep(device);
+    await loss.data();
+    await loss.backward();
+    const before = device.reports.length;
+    // The optimizers read the gradient of each parameter with its own `data()`.
+    for (const parameter of parameters) await parameter.grad.data();
+    const plans = device.reports.slice(before);
+    assert.deepEqual(
+      plans.map((plan) => [plan.dispatches, plan.submissions]),
+      [
+        [7, 1],
+        [1, 1],
+        [1, 1],
+        [1, 1],
+      ],
+    );
+    // The first gradient (of the first layer's weights) computes the whole graph. A call after a
+    // `binaryGrad` or a `matmul` stands apart: `binaryGrad` reads `dy` through an index (F3) and
+    // the counts change from layer to layer (F2). `reluGrad` joins the bias gradient of the layer
+    // it follows. The three gradients that follow find their inputs computed.
+    assert.deepEqual(outline(plans[0]), [
+      { calls: ["reduceGrad"], fused: false },
+      {
+        calls: ["crossEntropyLogitsGrad"],
+        fused: false,
+        why: "reduceGrad and crossEntropyLogitsGrad run as two dispatches because the trip counts differ (64 and 640)",
+      },
+      {
+        calls: ["binaryGrad"],
+        fused: false,
+        why: "crossEntropyLogitsGrad and binaryGrad run as two dispatches because binaryGrad reads `dy[at]` (line N)",
+      },
+      {
+        calls: ["matmul"],
+        fused: false,
+        why: "binaryGrad and matmul run as two dispatches because the trip counts differ (640 and 8192)",
+      },
+      {
+        calls: ["binaryGrad", "reluGrad"],
+        fused: true,
+        why: "matmul and binaryGrad run as two dispatches because binaryGrad reads `dy[at]` (line N)",
+      },
+      {
+        calls: ["binaryGrad"],
+        fused: false,
+        why: "reluGrad and binaryGrad run as two dispatches because binaryGrad reads `dy[at]` (line N)",
+      },
+      {
+        calls: ["matmul"],
+        fused: false,
+        why: "binaryGrad and matmul run as two dispatches because the trip counts differ (8192 and 100352)",
+      },
+    ]);
+    assert.deepEqual(
+      plans.slice(1).map((plan) => plan.groups.map((group) => group.calls)),
+      [[["binaryGrad"]], [["matmul"]], [["binaryGrad"]]],
+    );
+  });
+});
+
 test("a diamond computes its shared node once, in one dispatch", async () => {
   await onFakeGpu(async (device) => {
     const a = vector(device, [2, 1, 3]);

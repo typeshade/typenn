@@ -16,11 +16,15 @@ import {
   binaryGradReference,
   binaryReference,
   broadcastShape,
+  conv2dGradReference,
+  conv2dReference,
   crossEntropyReference,
   f32,
   matmulGradReference,
   matmulReference,
   matmulShape,
+  poolGradReference,
+  poolReference,
   reduceGradReference,
   reduceReference,
   sizeOf,
@@ -749,4 +753,190 @@ function lossCases() {
 export function softmaxAndLossCases() {
   seed = 3000;
   return [...softmaxCases(), ...lossCases()];
+}
+
+// ─── conv2d and pooling ───────────────────────────────────────────────────────────────────────
+
+/** [input shape, filter shape, options]: NHWC input, HWIO filter. */
+const CONVOLUTIONS = [
+  [[2, 5, 6, 3], [3, 2, 3, 4], {}],
+  [[2, 5, 6, 3], [3, 2, 3, 4], { padding: "same" }],
+  [[2, 5, 6, 3], [3, 2, 3, 4], { strides: 2 }],
+  [[2, 5, 6, 3], [3, 2, 3, 4], { strides: [2, 3], padding: "same" }],
+  [[1, 7, 7, 2], [1, 1, 2, 3], {}],
+  [[1, 4, 4, 1], [4, 4, 1, 2], { padding: "same" }],
+  [[1, 28, 28, 1], [5, 5, 1, 6], { padding: "same" }],
+];
+
+const label = (shape, filter, options) =>
+  `input [${shape}], filter [${filter}], ${JSON.stringify(options)}`;
+
+/** @returns {Case[]} */
+function convolutionCases() {
+  const cases = [];
+  for (const [shape, filterShape, options] of CONVOLUTIONS) {
+    const input = values(nextSeed(), sizeOf(shape), -1, 1);
+    const filter = values(nextSeed(), sizeOf(filterShape), -1, 1);
+    const { out, outShape } = conv2dReference(
+      input,
+      shape,
+      filter,
+      filterShape,
+      options,
+    );
+    cases.push({
+      name: `conv2d ${label(shape, filterShape, options)}`,
+      tolerance: 0,
+      gpuTolerance: 1e-5,
+      run: async (_nn, device) => ({
+        actual: await device
+          .tensor(input, { shape })
+          .conv2d(device.tensor(filter, { shape: filterShape }), options)
+          .data(),
+        expected: out,
+      }),
+    });
+    const dy = values(nextSeed(), sizeOf(outShape), -1, 1);
+    const [expectedInput, expectedFilter] = conv2dGradReference(
+      input,
+      shape,
+      filter,
+      filterShape,
+      options,
+      dy,
+    );
+    for (const [target, expected] of [
+      ["input", expectedInput],
+      ["filter", expectedFilter],
+    ])
+      cases.push({
+        name: `gradient of conv2d with respect to the ${target}, ${label(shape, filterShape, options)}`,
+        tolerance: 1e-5,
+        gpuTolerance: 1e-5,
+        run: async (nn, device) => {
+          const x = device.tensor(input, { shape });
+          const w = device.tensor(filter, { shape: filterShape });
+          const [actual] = nn.gradients(
+            x.conv2d(w, options),
+            [target === "input" ? x : w],
+            device.tensor(dy, { shape: outShape }),
+          );
+          return { actual: await actual.data(), expected };
+        },
+      });
+  }
+  // `conv2dGradients` is the same pair as the gradients of the graph.
+  const [shape, filterShape, options] = CONVOLUTIONS[1];
+  const input = values(nextSeed(), sizeOf(shape), -1, 1);
+  const filter = values(nextSeed(), sizeOf(filterShape), -1, 1);
+  const { outShape } = conv2dReference(
+    input,
+    shape,
+    filter,
+    filterShape,
+    options,
+  );
+  const dy = values(nextSeed(), sizeOf(outShape), -1, 1);
+  const expected = conv2dGradReference(
+    input,
+    shape,
+    filter,
+    filterShape,
+    options,
+    dy,
+  );
+  for (const [index, target] of ["input", "filter"].entries())
+    cases.push({
+      name: `conv2dGradients, the ${target} gradient`,
+      tolerance: 1e-5,
+      gpuTolerance: 1e-5,
+      run: async (_nn, device) => {
+        const gradients = device
+          .tensor(input, { shape })
+          .conv2dGradients(
+            device.tensor(filter, { shape: filterShape }),
+            device.tensor(dy, { shape: outShape }),
+            options,
+          );
+        return {
+          actual: await gradients[index].data(),
+          expected: expected[index],
+        };
+      },
+    });
+  return cases;
+}
+
+/** [input shape, options]: pooling windows of every padding, with a window larger than the stride
+ *  and a window smaller than it. */
+const POOLS = [
+  [[2, 6, 5, 3], { filterSize: 2 }],
+  [[2, 6, 5, 3], { filterSize: 2, padding: "same" }],
+  [[2, 6, 5, 3], { filterSize: 3, strides: 1, padding: "same" }],
+  [[2, 6, 5, 3], { filterSize: 3, strides: 2, padding: "same" }],
+  [[2, 6, 5, 3], { filterSize: [2, 3], strides: [1, 2] }],
+  [[1, 7, 7, 2], { filterSize: 3, strides: 1 }],
+  [[1, 4, 4, 1], { filterSize: 2, strides: 1, padding: "same" }],
+];
+
+/** @returns {Case[]} */
+function poolingCases() {
+  const cases = [];
+  for (const [kind, method] of [
+    ["max", "maxPool"],
+    ["avg", "avgPool"],
+  ])
+    for (const [shape, options] of POOLS) {
+      // Rounded to a few digits so that equal elements occur, which a maximum must break the same
+      // way on every tier.
+      const input = values(nextSeed(), sizeOf(shape), -2, 2).map((v) =>
+        f32(Math.round(v * 4) / 4),
+      );
+      const { out, outShape } = poolReference(kind, input, shape, options);
+      cases.push({
+        name: `${method} input [${shape}], ${JSON.stringify(options)}`,
+        tolerance: 0,
+        gpuTolerance: kind === "avg" ? 1e-5 : 0,
+        run: async (_nn, device) => ({
+          actual: await device.tensor(input, { shape })[method](options).data(),
+          expected: out,
+        }),
+      });
+      const dy = values(nextSeed(), sizeOf(outShape), -1, 1);
+      cases.push({
+        name: `gradient of ${method} input [${shape}], ${JSON.stringify(options)}`,
+        tolerance: 1e-5,
+        gpuTolerance: 1e-5,
+        run: async (nn, device) => {
+          const x = device.tensor(input, { shape });
+          const [actual] = nn.gradients(
+            x[method](options),
+            [x],
+            device.tensor(dy, { shape: outShape }),
+          );
+          return {
+            actual: await actual.data(),
+            expected: poolGradReference(kind, input, shape, options, dy),
+          };
+        },
+      });
+      cases.push({
+        name: `${method}Grad input [${shape}], ${JSON.stringify(options)}`,
+        tolerance: 1e-5,
+        gpuTolerance: 1e-5,
+        run: async (_nn, device) => ({
+          actual: await device
+            .tensor(input, { shape })
+            [`${method}Grad`](device.tensor(dy, { shape: outShape }), options)
+            .data(),
+          expected: poolGradReference(kind, input, shape, options, dy),
+        }),
+      });
+    }
+  return cases;
+}
+
+export function spatialCases() {
+  seed = 4000;
+  return [...convolutionCases(), ...poolingCases()];
 }

@@ -14,21 +14,20 @@ import {
   special,
   unary,
 } from "./operations/elementwise.js";
-import { matmul, type MatmulOptions } from "./operations/linear-algebra.js";
+import {
+  conv2d,
+  conv2dGradients,
+  matmul,
+  type MatmulOptions,
+} from "./operations/linear-algebra.js";
 import { softmaxCrossEntropyWithLogits } from "./operations/loss.js";
 import { softmax } from "./operations/normalization.js";
 import { reduce } from "./operations/reductions.js";
 import { reshape } from "./operations/shape.js";
+import { pool2d, pool2dGrad } from "./operations/spatial.js";
 import type { Conv2DOptions, Pool2DOptions } from "./spatial.js";
 
 export type { Conv2DOptions, Pool2DOptions } from "./spatial.js";
-
-/** Until the operation has its kernel functions. */
-function notYet(operation: string): never {
-  throw new Error(
-    `TypeNN operation ${operation} is not on kernel functions yet.`,
-  );
-}
 
 export class Tensor {
   /**
@@ -193,29 +192,29 @@ export class Tensor {
     return matmul(this, other, options);
   }
 
-  conv2d(_filter: Tensor, _options: Conv2DOptions = {}): Tensor {
-    return notYet("conv2d");
+  conv2d(filter: Tensor, options: Conv2DOptions = {}): Tensor {
+    return conv2d(this, filter, options);
   }
 
   conv2dGradients(
-    _filter: Tensor,
-    _outputGradient: Tensor,
-    _options: Conv2DOptions = {},
+    filter: Tensor,
+    outputGradient: Tensor,
+    options: Conv2DOptions = {},
   ): readonly [Tensor, Tensor] {
-    return notYet("conv2dGradients");
+    return conv2dGradients(this, filter, outputGradient, options);
   }
 
-  maxPool(_options: Pool2DOptions): Tensor {
-    return notYet("maxPool");
+  maxPool(options: Pool2DOptions): Tensor {
+    return pool2d(this, "maxPool", options);
   }
-  avgPool(_options: Pool2DOptions): Tensor {
-    return notYet("avgPool");
+  avgPool(options: Pool2DOptions): Tensor {
+    return pool2d(this, "avgPool", options);
   }
-  maxPoolGrad(_outputGradient: Tensor, _options: Pool2DOptions): Tensor {
-    return notYet("maxPoolGrad");
+  maxPoolGrad(outputGradient: Tensor, options: Pool2DOptions): Tensor {
+    return pool2dGrad(this, "maxPoolGrad", outputGradient, options);
   }
-  avgPoolGrad(_outputGradient: Tensor, _options: Pool2DOptions): Tensor {
-    return notYet("avgPoolGrad");
+  avgPoolGrad(outputGradient: Tensor, options: Pool2DOptions): Tensor {
+    return pool2dGrad(this, "avgPoolGrad", outputGradient, options);
   }
 
   softmax(axis = -1): Tensor {
