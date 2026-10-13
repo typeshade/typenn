@@ -263,22 +263,32 @@ Each row gives the reason and the next action. A next action marked "proposal" i
 | No hardware GPU run                            | The GPU tests ran on SwiftShader in Chromium 141 only. No time on SwiftShader says how fast a hardware GPU trains.                                                                                                                        | Run `node scripts/bench-step.mjs` and `npm run test:gpu` on a machine with a GPU.                                                                 |
 | `publish.yml` is stale                         | Its check expects an empty namespace (`Object.keys(nn).length !== 0`), and the package exports names. It was so before this change.                                                                                                       | The owner decides what the pre-publish check must hold.                                                                                           |
 
-### Gaps in TypeShade at commit 5fb79c7
+### Gaps in TypeShade at commit 96dbaa9
 
-TypeNN works around each gap. None is filed as an issue yet.
+TypeNN works around each gap. None is filed as an issue yet. Each gap was re-checked at 96dbaa9
+(TypeNN's pin, after the bump from 5fb79c7). The check and its result are in each item. The
+re-checks ran the compiler on probe sources (`compile()` of `typeshade`, Node 22) and read the
+source diff between the two pins. They did not re-run the GPU measurements.
 
-- A kernel function cannot share the name of a builtin that it calls (TS8099 and TS8031). This is as
-  specified. TypeNN names the maps `<operation>Map`.
-- An array parameter named like a reserved WGSL word compiles for the CPU and WebGL2 tiers. WebGPU
-  refuses it at pipeline creation: `'filter' is a reserved keyword`. The surface document (section 62) says that the compiler escapes the spelling of a parameter that a target reserves, and refuses
-  a reserved interface name with TS8068. The array parameter of a kernel function got neither.
-- One `Resident` passed as two parameters of one call throws a `TypeError`. TypeNN passes a copy.
-- After a plan fails validation on WebGPU, the uniform buffer of that plan's arguments stays
-  undestroyed. It survived `device.dispose()` on the recording device. The size is 16, the usage 76.
-- On the CPU tier, `toCpu` (`src/core/host-entry.ts`, called by `onCpu` in `src/core/host-kernel.ts`)
-  copies each array argument to a JavaScript array on each call, and `fromCpu` copies it back. Three
-  calls over 2^24 + 1 elements reach 3.3 GB of resident memory. The build before this change reached
-  2.3 GB on the same chain.
+- Closed at 96dbaa9 (typeshade #607, "A failed batch destroys every buffer it made"). The
+  batch now destroys its owned and staged buffers in a `finally` (`src/core/host-entry.ts`).
+  Re-checked by reading the source. Not re-run on the recording device.
+- Still open: a kernel function cannot share the name of a builtin that it calls (TS8099 and
+  TS8031). This is as specified. Re-checked: a kernel `clamp` that calls `clamp` gives TS8031
+  (recursive call) at 96dbaa9. TypeNN names the maps `<operation>Map`.
+- Partly changed, still open: an array parameter named like a reserved WGSL word compiles for the
+  CPU and WebGL2 tiers. WebGPU refuses it at pipeline creation: `'filter' is a reserved keyword`.
+  At 96dbaa9 the compiler refuses a reserved name on an entry binding with TS8068. A kernel
+  function's array parameter named `filter` still gets no diagnostic (a `hostFace` probe, with
+  `fuse: true`). The WebGPU refusal of that parameter was not re-run.
+- Still open, not re-run: one `Resident` passed as two parameters of one call throws a
+  `TypeError`. TypeNN passes a copy. Reading the diff of `src/core/resident.ts` and `src/core/host-kernel.ts`
+  found no change to this check (a reading, not a run).
+- Still open, not re-measured: on the CPU tier, `toCpu` (`src/core/host-entry.ts`, called by `onCpu`
+  in `src/core/host-kernel.ts`) copies each array argument to a JavaScript array on each call, and
+  `fromCpu` copies it back. The byte copy of 96dbaa9 covers `readInto` and `pack`, not the array
+  path of `toCpu`. Three calls over 2^24 + 1 elements reached 3.3 GB of resident memory at
+  5fb79c7. That figure was not measured again.
 
 ## Kernel function modules
 

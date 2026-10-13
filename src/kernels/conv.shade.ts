@@ -5,7 +5,8 @@
 // of the array it writes, which loops over the window. `outHeight`, `outWidth`, the strides and
 // `padTop` and `padLeft` are the window of the operation, as `spatialWindow` works them out on
 // the host. The filter is `weights` and not `filter`: `filter` is a reserved word of WGSL, and
-// TypeShade 5fb79c7 names the storage binding of an array parameter after the parameter.
+// TypeShade 96dbaa9 names the storage binding of an array parameter after the parameter. Its
+// compiler refuses a reserved name on an entry binding (TS8068), but not on a kernel parameter.
 
 export function conv2d(
   out: array<f32>,

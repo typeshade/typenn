@@ -264,7 +264,7 @@ current Tensor-graph gradient rules.
 
 TypeShade owns the shader language and the GPU execution runtime. TypeNN's `.shade.ts` kernel
 functions are compiled during the library build. Applications use TypeNN's Tensor and Module API
-and do not author shaders. The build pins TypeShade to the source commit `5fb79c7`, which has
+and do not author shaders. The build pins TypeShade to the source commit `96dbaa9`, which has
 `typeshade/fuse`, because TypeShade's npm registry package is still a placeholder.
 
 For custom functions written as pure TypeShade IR, TypeNN also re-exports TypeShade's
@@ -340,8 +340,46 @@ unsupported, and ask for the missing rule by name when called.
 
 ## Measurements
 
-Before is `main` at commit `77dbb19`, which pins TypeShade `946b0ea`. After is this branch, which
-pins TypeShade `5fb79c7`. Both were measured on one machine.
+Each measurement names the commit it was taken on. The sections below are historical, except
+"Pin 96dbaa9 (current)", which holds the numbers for the pin the build uses now. A row that
+names an older commit or pin is a record of that commit, and the current code may differ.
+
+### Pin 96dbaa9 (current)
+
+Before is `origin/main` at commit `f22b352`, which pins TypeShade `5fb79c7`. After is this
+branch, which pins TypeShade `96dbaa9`. Both were measured on one machine, in headless Chromium
+(`chromium-1194`) with SwiftShader, a software device. A time says what a step costs in this
+harness, and not how fast a hardware GPU trains.
+
+The MNIST and CNN steps come from `node scripts/bench-step.mjs --scenario step|cnn --steps 20
+--warmup 5`. Each row is the median of 20 steps. The rounds alternate between the builds.
+
+| Scenario             | Build  | Rounds (median ms)  | Median of the rounds |
+| -------------------- | ------ | ------------------- | -------------------: |
+| MNIST step, batch 64 | before | 123.3, 123.7, 130.7 |                123.7 |
+| MNIST step, batch 64 | after  | 96.6, 104.6, 103.4  |                103.4 |
+| CNN step, batch 64   | before | 539.9, 516.5, 581.1 |                539.9 |
+| CNN step, batch 64   | after  | 456.3, 481.4, 463.3 |                463.3 |
+
+The calls the device is given did not change between the two pins. `--scenario counts` gives the
+same dispatches and submissions for each row of the table in "Calls the device is given".
+
+The main-thread cost comes from a CDP CPU profile of the lab (`/lab/`) training MNIST. Each run
+trains one step and then 21 steps, with one evaluation batch. The cost of one step is the
+difference of the two profiles divided by 20. Three alternating rounds:
+
+| Measure per training step      | Build  | Rounds (ms)      | Median |
+| ------------------------------ | ------ | ---------------- | -----: |
+| Main-thread busy time          | before | 79.6, 63.4, 74.4 |   74.4 |
+| Main-thread busy time          | after  | 24.4, 39.0, 23.9 |   24.4 |
+| Task duration (`TaskDuration`) | before | 92.6, 79.3, 84.7 |   84.7 |
+| Task duration (`TaskDuration`) | after  | 34.1, 45.5, 33.3 |   34.1 |
+
+In the before build the largest self time is a per-element `DataView` loop that reads and writes
+flat arrays (17 to 29 ms per step over the three rounds). The function names are minified, so this
+attribution comes from the source of the bundle, not from the profile. The garbage collector takes 15 to 24 ms per step before and
+2.7 to 4.0 ms after. In the after build the top self-time functions are DOM and React calls, at
+about 1 ms each per step.
 
 ### Calls the device is given
 
