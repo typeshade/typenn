@@ -66,7 +66,84 @@ export interface Device {
     values: ArrayLike<number>,
     options: { readonly shape: readonly number[] },
   ): Tensor;
+  /** Upload a dataset once; each batch is built on the device (see DeviceDataset). */
+  dataset(options: DeviceDatasetOptions): DeviceDataset;
   dispose(): Promise<void>;
+}
+
+/** A source array of one split: unsigned integers (u8, u16, u32) or f32. */
+export type SourceArray = Uint8Array | Uint16Array | Uint32Array | Float32Array;
+
+/** One split of a dataset, as the host gives it. */
+export interface DatasetSplit {
+  readonly count: number;
+  readonly x: SourceArray;
+  readonly y: SourceArray;
+  /** Text only: count + 1 token offsets, starting at 0. */
+  readonly offsets?: Uint32Array;
+}
+
+/** How the inputs of a dataset are read. */
+export type DatasetInputs =
+  | {
+      /** u8 pixels, scaled to [0, 1] as x / 255. */
+      readonly kind: "images";
+      readonly features: number;
+      readonly shape?: readonly number[];
+    }
+  | {
+      /** f32 features, normalised as (x - mean) / std. A zero std is read as 1. */
+      readonly kind: "tabular";
+      readonly features: number;
+      readonly mean: ArrayLike<number>;
+      readonly std: ArrayLike<number>;
+      readonly shape?: readonly number[];
+    }
+  | {
+      /** Text: multi-hot bag of words over the first `vocab` token ids. */
+      readonly kind: "text";
+      readonly vocab: number;
+    };
+
+export interface DeviceDatasetOptions {
+  readonly inputs: DatasetInputs;
+  readonly train: DatasetSplit;
+  readonly test: DatasetSplit;
+  readonly target?: { readonly mean: number; readonly std: number };
+  /** The largest shard of a source, in bytes. */
+  readonly shardBytes?: number;
+}
+
+/** One batch: the inputs and the labels, as Tensors of the lazy graph. */
+export interface DeviceBatch {
+  readonly input: Tensor;
+  readonly labels: Tensor;
+  readonly size: number;
+}
+
+/**
+ * Where the dataset keeps its data. `device`: batches are built on the device. `host`: each batch
+ * is built on the host and uploaded, with `reason` the cause.
+ */
+export interface Residency {
+  readonly tier: "device" | "host";
+  readonly reason?: string;
+  readonly shards: { readonly train: number; readonly test: number };
+}
+
+export interface DeviceDataset {
+  readonly residency: Residency;
+  readonly inputShape: readonly number[];
+  readonly trainCount: number;
+  readonly testCount: number;
+  /** The device bytes the dataset holds. */
+  readonly bytes: number;
+  shuffle(seed: number): void;
+  order(indices: ArrayLike<number>): void;
+  batch(offset: number, count: number): DeviceBatch;
+  batches(batchSize: number): Generator<DeviceBatch>;
+  evaluation(batchSize: number): Generator<DeviceBatch>;
+  dispose(): void;
 }
 
 export type DevicePreference = "auto" | "cpu" | "webgpu" | "webgl2";
@@ -172,7 +249,7 @@ export class Flatten extends Module {
 export class CrossEntropyLoss {
   readonly reduction: "none" | "sum" | "mean";
   constructor(options?: { readonly reduction?: "none" | "sum" | "mean" });
-  forward(logits: Tensor, labels: ArrayLike<number>): Tensor;
+  forward(logits: Tensor, labels: ArrayLike<number> | Tensor): Tensor;
 }
 
 export class MSELoss {

@@ -601,3 +601,42 @@ test("shards: the rows of a shard follow from the shard size, with a sample of C
   host.dispose();
   await device.dispose();
 });
+
+test("backward: a device batch under Flatten and Linear gives the host batch's weight gradient", async () => {
+  // The lab trains from device batches, and its MLP starts with Flatten. A batch is a gather with no
+  // gradient rule, so backward() must not ask for one: the weight gradient is the host batch's.
+  const device = await nn.device({ device: "cpu" });
+  const rows = 6,
+    side = 2,
+    classes = 3;
+  const features = side * side;
+  const x = Uint8Array.from(ints(rows * features, 256, 5));
+  const y = Uint8Array.from(ints(rows, classes, 6));
+  const data = device.dataset({
+    inputs: { kind: "images", features, shape: [side, side] },
+    train: { count: rows, x, y },
+    test: { count: rows, x, y },
+  });
+  const batch = data.batch(0, rows);
+  const host = device.tensor(
+    Float32Array.from(x, (v) => v / 255),
+    {
+      shape: [rows, side, side],
+    },
+  );
+  const weightGradient = async (input, labelValues) => {
+    const model = new nn.Sequential(
+      new nn.Flatten(),
+      new nn.Linear(features, classes, { seed: 3 }),
+    ).to(device);
+    const logits = model.forward(input);
+    const loss = new nn.CrossEntropyLoss().forward(logits, labelValues);
+    await loss.backward();
+    return values(model.parameters()[0].grad);
+  };
+  const fromDevice = await weightGradient(batch.input, batch.labels);
+  const fromHost = await weightGradient(host, Array.from(y));
+  assert.deepEqual(fromDevice, fromHost);
+  data.dispose();
+  await device.dispose();
+});

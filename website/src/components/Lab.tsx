@@ -58,8 +58,10 @@ import {
 } from "../lab/train";
 import type {
   DevicePlan,
+  DeviceDataset,
   GraphSnapshot,
   Module,
+  Residency,
 } from "../vendor/typenn/index.js";
 
 type Locale = "en" | "ko";
@@ -86,6 +88,9 @@ const text: { en: Record<string, any>; ko: Record<string, any> } = {
     cachedNote: "Cached in this browser. No download is needed.",
     notCached: "Not cached yet. The first download fetches the files.",
     bytes: "Size",
+    residency: "Batches built",
+    residencyDevice: "On the device, {shards} shards, {size} held",
+    residencyHost: "On the host, uploaded per step: {reason}",
     counts: "Train / test",
     license: "License",
     citation: "Citation",
@@ -215,6 +220,9 @@ const text: { en: Record<string, any>; ko: Record<string, any> } = {
     cachedNote: "이 브라우저에 저장되어 있습니다. 다시 내려받지 않습니다.",
     notCached: "아직 저장되지 않았습니다. 처음 내려받을 때 파일을 가져옵니다.",
     bytes: "크기",
+    residency: "배치를 만드는 곳",
+    residencyDevice: "장치에서, 샤드 {shards}개, {size} 보관",
+    residencyHost: "호스트에서, 단계마다 업로드: {reason}",
     counts: "학습 / 테스트",
     license: "라이선스",
     citation: "출처",
@@ -408,6 +416,15 @@ interface Session {
   readonly spec: ModelSpec;
   readonly scale: { mean: number; std: number } | undefined;
   readonly result: RunResult;
+  /** The device dataset of the run that trained the model. Disposed when the session ends. */
+  readonly dataset?: DeviceDataset;
+}
+
+/** Where the batches of the selected dataset are built, from the last run that uploaded it. */
+interface ResidencyState {
+  readonly id: string;
+  readonly residency: Residency;
+  readonly bytes: number;
 }
 
 /** The host copy of a trained model, kept per dataset in this page. */
@@ -489,6 +506,7 @@ export default function Lab({ locale }: { locale: Locale }) {
   const [results, setResults] = useState<RunResult[]>([]);
   const [runError, setRunError] = useState<string | null>(null);
   const [session, setSession] = useState<Session | null>(null);
+  const [residency, setResidency] = useState<ResidencyState | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [stopping, setStopping] = useState(false);
   const [activeTier, setActiveTier] = useState<string | null>(null);
@@ -588,9 +606,15 @@ export default function Lab({ locale }: { locale: Locale }) {
       delete window.__typennLab;
       const current = sessionRef.current;
       sessionRef.current = null;
-      if (current) void current.device.dispose();
+      if (current) void endSession(current);
     };
   }, []);
+
+  /** Dispose the session's dataset, then its device. Every session change goes through here. */
+  function endSession(ended: Session | null): Promise<void> {
+    ended?.dataset?.dispose();
+    return ended ? ended.device.dispose() : Promise.resolve();
+  }
 
   /** Drop the arrays of every dataset except `keep` and the one the live session uses. */
   function releaseDatasets(keep: string) {
@@ -653,13 +677,15 @@ export default function Lab({ locale }: { locale: Locale }) {
     setActivating(null);
     setSelected(config.dataset);
     let device: Device | undefined;
+    // The device dataset of this run: it moves into the session when the run keeps a model.
+    let ownDataset: DeviceDataset | undefined;
     try {
       const data = await ensureData(config.dataset);
       const nn = await NN_PROMISE();
       const previous = sessionRef.current;
       sessionRef.current = null;
       setSession(null);
-      if (previous) await previous.device.dispose();
+      await endSession(previous);
       releaseDatasets(config.dataset);
       device = await nn.device({ device: config.tier });
       setActiveTier(device.backend.name);
@@ -673,6 +699,14 @@ export default function Lab({ locale }: { locale: Locale }) {
       const result = await train(config, data, nn, trainDevice, {
         shouldStop: () => stopRef.current,
         onModel: (m) => (model = m),
+        onDataset: (d) => {
+          ownDataset = d;
+          setResidency({
+            id: config.dataset,
+            residency: d.residency,
+            bytes: d.bytes,
+          });
+        },
         onStep: (info) => {
           const done = (info.epoch - 1) * info.stepsPerEpoch + info.step;
           lossBuffer.current.push(info.loss);
@@ -708,7 +742,9 @@ export default function Lab({ locale }: { locale: Locale }) {
           spec,
           scale,
           result,
+          dataset: ownDataset,
         };
+        ownDataset = undefined;
         sessionRef.current = next;
         setSession(next);
         device = undefined;
@@ -721,6 +757,8 @@ export default function Lab({ locale }: { locale: Locale }) {
     } finally {
       // The steps of the last 100 ms reach the page before the run ends.
       if (latestProgress.current !== null) flushSteps();
+      // A dataset that no session holds (a failed run, or a run without a kept model) is freed here.
+      ownDataset?.dispose();
       if (device) await device.dispose().catch(() => undefined);
       runningRef.current = false;
       setRunning(false);
@@ -744,7 +782,7 @@ export default function Lab({ locale }: { locale: Locale }) {
       const previous = sessionRef.current;
       sessionRef.current = null;
       setSession(null);
-      if (previous) await previous.device.dispose();
+      await endSession(previous);
       releaseDatasets(id);
       device = await nn.device({ device: form.tier });
       if (stale()) return;
@@ -926,6 +964,15 @@ export default function Lab({ locale }: { locale: Locale }) {
 
   function selectDataset(id: string) {
     if (running || graphBusy) return;
+    // The dataset of the live session is for the old selection: free it now. The model stays.
+    const live = sessionRef.current;
+    if (live?.dataset && live.data.info.id !== id) {
+      live.dataset.dispose();
+      const kept: Session = { ...live, dataset: undefined };
+      sessionRef.current = kept;
+      setSession(kept);
+    }
+    setResidency(null);
     releaseDatasets(id);
     setSelected(id);
     setForm({ ...defaultConfig(id), tier: form.tier });
@@ -993,6 +1040,12 @@ export default function Lab({ locale }: { locale: Locale }) {
                       </dd>
                       <dt>{words.bytes}</dt>
                       <dd>{formatBytes(d.totalBytes)}</dd>
+                      {selected === d.id && residency?.id === d.id && (
+                        <>
+                          <dt>{words.residency}</dt>
+                          <dd>{residencyText(residency, words)}</dd>
+                        </>
+                      )}
                       <dt>{words.license}</dt>
                       <dd>{m.license}</dd>
                       <dt>{words.citation}</dt>
@@ -1932,6 +1985,16 @@ function formatDuration(seconds: number) {
   if (!Number.isFinite(seconds)) return "--:--";
   const s = Math.max(0, Math.round(seconds));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
+/** The residency line: where the batches are built, with the bytes held or the reason of a host fallback. */
+function residencyText(state: ResidencyState, words: Words): string {
+  const { residency, bytes } = state;
+  if (residency.tier === "device")
+    return words.residencyDevice
+      .replace("{shards}", String(residency.shards.train))
+      .replace("{size}", formatBytes(bytes));
+  return words.residencyHost.replace("{reason}", residency.reason ?? "");
 }
 
 function formatBytes(bytes: number) {

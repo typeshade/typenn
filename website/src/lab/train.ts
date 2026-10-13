@@ -2,12 +2,17 @@
 // in, so the same code runs in the island, in the automation hook and in a node check.
 
 import type { LoadedDataset, LoadedSplit } from "./datasets";
-import { bagOfWordsBatch, imageBatch, labels, tabularBatch } from "./datasets";
+import { bagOfWordsBatch, imageBatch, tabularBatch } from "./datasets";
 import version from "../vendor/typenn/version.json";
 
 export type NN = typeof import("../vendor/typenn/index.js");
 export type Device = import("../vendor/typenn/index.js").Device;
-type Tensor = import("../vendor/typenn/index.js").Tensor;
+export type DeviceDataset = import("../vendor/typenn/index.js").DeviceDataset;
+export type Residency = import("../vendor/typenn/index.js").Residency;
+type DatasetInputs = import("../vendor/typenn/index.js").DatasetInputs;
+type DatasetSplit = import("../vendor/typenn/index.js").DatasetSplit;
+type DeviceDatasetOptions =
+  import("../vendor/typenn/index.js").DeviceDatasetOptions;
 type Module = import("../vendor/typenn/index.js").Module;
 
 export type Preset = "mlp" | "cnn" | "bag" | "regression";
@@ -70,6 +75,12 @@ export interface RunResult {
   readonly kind: RunKind;
   /** True when the run ended at config.maxSteps. A user stop leaves it false. */
   readonly capped: boolean;
+  /** Where the batches of the run were built: on the device, or on the host with the reason. */
+  readonly residency: Residency;
+  /** The device bytes the dataset held during the run. */
+  readonly datasetBytes: number;
+  /** Host time of the one dataset upload, in seconds. */
+  readonly uploadSeconds: number;
   readonly userAgent: string;
   readonly typennCommit: string;
   readonly finishedAt: string;
@@ -96,6 +107,8 @@ export interface Hooks {
   shouldStop?: () => boolean;
   /** Called once the model is on the device, before the first step. The caller keeps it for prediction. */
   onModel?: (model: Module) => void;
+  /** Called with the device dataset of the run. The caller then owns it and disposes it. */
+  onDataset?: (dataset: DeviceDataset) => void;
 }
 
 /** The shape of the input and the output of a model, from the dataset. */
@@ -242,8 +255,50 @@ export function targetScale(split: LoadedSplit): TargetScale {
 const YIELD = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 /**
+ * The device-dataset options of a run: the sources of the split, uploaded once to the device. The
+ * regression target is normalised on the device with the train-split statistics.
+ */
+export function datasetOptions(
+  data: LoadedDataset,
+  spec: ModelSpec,
+  scale: TargetScale | undefined,
+): DeviceDatasetOptions {
+  const size = inputSize(spec);
+  const inputs: DatasetInputs =
+    spec.preset === "bag"
+      ? { kind: "text", vocab: spec.inputShape[0]! }
+      : spec.preset === "regression"
+        ? {
+            kind: "tabular",
+            features: size,
+            mean: spec.features!.mean,
+            std: spec.features!.std,
+            shape: spec.inputShape,
+          }
+        : { kind: "images", features: size, shape: spec.inputShape };
+  return {
+    inputs,
+    train: toSplit(data.train),
+    test: toSplit(data.test),
+    target: scale,
+  };
+}
+
+function toSplit(split: LoadedSplit): DatasetSplit {
+  return {
+    count: split.count,
+    x: split.x,
+    y: split.y,
+    offsets: split.offsets,
+  };
+}
+
+/**
  * Train the preset model on the full train split for `config.epochs` epochs, then evaluate on the
- * full test split after each epoch. `device` is opened by the caller and is not disposed here.
+ * full test split after each epoch. The batches are built on the device from a dataset uploaded
+ * once per run. `device` is opened by the caller and is not disposed here. The dataset goes to
+ * `hooks.onDataset` when that hook is set, and the caller then disposes it; otherwise it is
+ * disposed when the run ends.
  */
 export async function train(
   config: RunConfig,
@@ -257,119 +312,117 @@ export async function train(
   hooks.onModel?.(model);
   const parameters = model.parameters();
   const regression = config.model === "regression";
+  if (regression && !spec.features)
+    throw new Error("A regression dataset needs its feature normalisation.");
   const scale = regression ? targetScale(data.train) : undefined;
   const optimizer =
     config.optimizer === "adam"
       ? nn.optim.Adam(parameters, { lr: config.learningRate })
       : nn.optim.SGD(parameters, { lr: config.learningRate });
   const criterion = regression ? new nn.MSELoss() : new nn.CrossEntropyLoss();
-  const size = inputSize(spec);
   const N = data.train.count;
   const B = config.batchSize;
   const stepsPerEpoch = Math.ceil(N / B);
   const rng = mulberry32(config.seed);
-  const order = new Uint32Array(N);
-  const batchInput = new Float32Array(B * size);
+  const uploadStart = performance.now();
+  const dataset = device.dataset(datasetOptions(data, spec, scale));
+  const uploadSeconds = (performance.now() - uploadStart) / 1000;
+  const keep = hooks.onDataset !== undefined;
+  hooks.onDataset?.(dataset);
   const started = performance.now();
   const epochs: EpochResult[] = [];
   let steps = 0;
   let samples = 0;
   let test: Metrics = {};
-  if (regression && !spec.features)
-    throw new Error("A regression dataset needs its feature normalisation.");
   let completed = true;
   let capped = false;
 
-  stop: for (let epoch = 1; epoch <= config.epochs; epoch++) {
-    model.train();
-    const epochStart = performance.now();
-    for (let i = 0; i < N; i++) order[i] = i;
-    for (let i = N - 1; i > 0; i--) {
-      const j = Math.floor(rng() * (i + 1));
-      [order[i], order[j]] = [order[j]!, order[i]!];
-    }
-    let lossSum = 0;
-    let epochSamples = 0;
-    for (let s = 0; s < stepsPerEpoch; s++) {
-      if (hooks.shouldStop?.()) {
+  try {
+    stop: for (let epoch = 1; epoch <= config.epochs; epoch++) {
+      model.train();
+      const epochStart = performance.now();
+      // One upload of the epoch order: a seed drawn from the run's generator.
+      dataset.shuffle(Math.floor(rng() * 0x100000000));
+      let lossSum = 0;
+      let epochSamples = 0;
+      let s = 0;
+      for (const batch of dataset.batches(B)) {
+        s++;
+        if (hooks.shouldStop?.()) {
+          completed = false;
+          break stop;
+        }
+        if (config.maxSteps !== undefined && steps >= config.maxSteps) {
+          capped = true;
+          break;
+        }
+        const n = batch.size;
+        await optimizer.zeroGrad();
+        const logits = model.forward(batch.input);
+        const loss = regression
+          ? (criterion as InstanceType<NN["MSELoss"]>).forward(
+              logits,
+              batch.labels,
+            )
+          : (criterion as InstanceType<NN["CrossEntropyLoss"]>).forward(
+              logits,
+              batch.labels,
+            );
+        await loss.backward();
+        // One plan updates the parameters and reads the loss; the loss is the value before the update.
+        const [[value]] = await optimizer.step({ alsoRead: [loss] });
+        await loss.disposeGraph(parameters);
+        const lossValue = value ?? Number.NaN;
+        lossSum += lossValue * n;
+        epochSamples += n;
+        steps++;
+        samples += n;
+        if (config.maxSteps !== undefined && steps >= config.maxSteps)
+          capped = true;
+        const elapsed = (performance.now() - started) / 1000;
+        hooks.onStep?.({
+          epoch,
+          step: s,
+          stepsPerEpoch,
+          loss: lossValue,
+          samplesPerSecond: samples / Math.max(elapsed, 1e-9),
+          elapsedSeconds: elapsed,
+        });
+        await YIELD();
+        if (capped) break;
+      }
+      const evaluated = await evaluate(
+        model,
+        data,
+        dataset,
+        spec,
+        scale,
+        256,
+        config.maxEvalBatches,
+      );
+      const evalMetrics = evaluated.metrics;
+      test = evalMetrics;
+      const seconds = (performance.now() - epochStart) / 1000;
+      epochs.push({
+        epoch,
+        trainLoss: epochSamples > 0 ? lossSum / epochSamples : Number.NaN,
+        test: evalMetrics,
+        testSamples: evaluated.samples,
+        seconds,
+      });
+      hooks.onEpoch?.({
+        epoch,
+        testMetric: regression ? evalMetrics.rmse! : evalMetrics.accuracy!,
+        seconds,
+        metrics: evalMetrics,
+      });
+      if (capped) {
         completed = false;
         break stop;
       }
-      if (config.maxSteps !== undefined && steps >= config.maxSteps) {
-        capped = true;
-        break;
-      }
-      const indices = order.subarray(s * B, Math.min(N, (s + 1) * B));
-      const n = indices.length;
-      const shape = [n, ...spec.inputShape];
-      const batch = fillInputs(data.train, indices, spec, batchInput);
-      await optimizer.zeroGrad();
-      const input = device.tensor(batch.subarray(0, n * size), { shape });
-      const logits = model.forward(input);
-      const loss = regression
-        ? (criterion as InstanceType<NN["MSELoss"]>).forward(
-            logits,
-            Float32Array.from(
-              indices,
-              (i) => (data.train.y[i]! - scale!.mean) / scale!.std,
-            ),
-          )
-        : (criterion as InstanceType<NN["CrossEntropyLoss"]>).forward(
-            logits,
-            labels(data.train, indices),
-          );
-      await loss.backward();
-      // One plan updates the parameters and reads the loss; the loss is the value before the update.
-      const [[value]] = await optimizer.step({ alsoRead: [loss] });
-      await loss.disposeGraph(parameters);
-      const lossValue = value ?? Number.NaN;
-      lossSum += lossValue * n;
-      epochSamples += n;
-      steps++;
-      samples += n;
-      if (config.maxSteps !== undefined && steps >= config.maxSteps)
-        capped = true;
-      const elapsed = (performance.now() - started) / 1000;
-      hooks.onStep?.({
-        epoch,
-        step: s + 1,
-        stepsPerEpoch,
-        loss: lossValue,
-        samplesPerSecond: samples / Math.max(elapsed, 1e-9),
-        elapsedSeconds: elapsed,
-      });
-      await YIELD();
-      if (capped) break;
     }
-    const evaluated = await evaluate(
-      model,
-      device,
-      data,
-      spec,
-      scale,
-      256,
-      config.maxEvalBatches,
-    );
-    const evalMetrics = evaluated.metrics;
-    test = evalMetrics;
-    const seconds = (performance.now() - epochStart) / 1000;
-    epochs.push({
-      epoch,
-      trainLoss: epochSamples > 0 ? lossSum / epochSamples : Number.NaN,
-      test: evalMetrics,
-      testSamples: evaluated.samples,
-      seconds,
-    });
-    hooks.onEpoch?.({
-      epoch,
-      testMetric: regression ? evalMetrics.rmse! : evalMetrics.accuracy!,
-      seconds,
-      metrics: evalMetrics,
-    });
-    if (capped) {
-      completed = false;
-      break stop;
-    }
+  } finally {
+    if (!keep) dataset.dispose();
   }
 
   return {
@@ -385,6 +438,9 @@ export async function train(
     completed,
     kind: config.kind ?? "full",
     capped,
+    residency: dataset.residency,
+    datasetBytes: dataset.bytes,
+    uploadSeconds,
     userAgent:
       typeof navigator === "undefined" ? "unknown" : navigator.userAgent,
     typennCommit: version.commit,
@@ -415,11 +471,11 @@ export function fillInputs(
   return imageBatch(split, indices, out);
 }
 
-/** Evaluate on the full test split, in batches, with the model in eval mode and no backward. */
+/** Evaluate on the full test split, in batches of the device dataset, with the model in eval mode and no backward. */
 export async function evaluate(
   model: Module,
-  device: Device,
   data: LoadedDataset,
+  dataset: DeviceDataset,
   spec: ModelSpec,
   scale: TargetScale | undefined,
   batchSize = 256,
@@ -431,27 +487,20 @@ export async function evaluate(
   const N = split.count;
   const limit =
     maxBatches === undefined ? N : Math.min(N, maxBatches * batchSize);
-  const size = inputSize(spec);
-  const buffer = new Float32Array(batchSize * size);
-  const all = new Uint32Array(N);
-  for (let i = 0; i < N; i++) all[i] = i;
   let correct = 0;
   let squared = 0;
   let absolute = 0;
+  let start = 0;
   try {
-    for (let start = 0; start < limit; start += batchSize) {
-      const indices = all.subarray(start, Math.min(limit, start + batchSize));
-      const n = indices.length;
-      const batch = fillInputs(split, indices, spec, buffer);
-      const input = device.tensor(batch.subarray(0, n * size), {
-        shape: [n, ...spec.inputShape],
-      });
-      const logits = model.forward(input);
+    for (const batch of dataset.evaluation(batchSize)) {
+      if (start >= limit) break;
+      const n = Math.min(batch.size, limit - start);
+      const logits = model.forward(batch.input);
       const values = await logits.data();
       if (scale) {
         for (let k = 0; k < n; k++) {
           const predicted = values[k]! * scale.std + scale.mean;
-          const error = predicted - split.y[indices[k]!]!;
+          const error = predicted - split.y[start + k]!;
           squared += error * error;
           absolute += Math.abs(error);
         }
@@ -462,10 +511,11 @@ export async function evaluate(
           for (let c = 1; c < outputs; c++)
             if (values[k * outputs + c]! > values[k * outputs + best]!)
               best = c;
-          if (best === split.y[indices[k]!]) correct++;
+          if (best === split.y[start + k]) correct++;
         }
       }
       await logits.disposeGraph(parameters);
+      start += batch.size;
       await YIELD();
     }
   } finally {
