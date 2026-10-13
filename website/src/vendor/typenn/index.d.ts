@@ -6,6 +6,8 @@ export interface Tensor {
   readonly device: Device;
   readonly shape: readonly number[];
   readonly requiresGrad: boolean;
+  /** The gradient that backward() accumulated on a parameter. Lazy until it is read. */
+  grad?: Tensor;
   add(other: Tensor): Tensor;
   sub(other: Tensor): Tensor;
   mul(other: Tensor): Tensor;
@@ -36,6 +38,8 @@ export interface FuseReport {
   readonly groups: readonly {
     readonly calls: readonly string[];
     readonly fused: boolean;
+    /** Why the group stands apart from the group before it, in the author's words. */
+    readonly why?: string;
   }[];
 }
 

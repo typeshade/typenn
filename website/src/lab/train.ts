@@ -389,7 +389,7 @@ export async function train(
 }
 
 /** The model input of the indices of a split, in the layout of `spec.inputShape`. */
-function fillInputs(
+export function fillInputs(
   split: LoadedSplit,
   indices: ArrayLike<number>,
   spec: ModelSpec,
