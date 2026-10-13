@@ -138,6 +138,7 @@ const text: { en: Record<string, any>; ko: Record<string, any> } = {
     },
     completed: "Completed",
     stopped: "Stopped",
+    quickStatus: "Quick ({steps} steps)",
     tryTitle: "5. Try the model",
     noModel: "No model trained on {dataset} yet.",
     quickTrain: "Train a quick model",
@@ -266,6 +267,7 @@ const text: { en: Record<string, any>; ko: Record<string, any> } = {
     },
     completed: "완료",
     stopped: "중지됨",
+    quickStatus: "빠른 학습 ({steps}단계)",
     tryTitle: "5. 모델 실행해 보기",
     noModel: "{dataset} 학습 모델이 아직 없습니다.",
     quickTrain: "간단한 모델 학습하기",
@@ -640,7 +642,15 @@ export default function Lab({ locale }: { locale: Locale }) {
     setMetrics([]);
     setProgress(null);
     setActiveTier(null);
-    setForm({ ...config, maxSteps: undefined, maxEvalBatches: undefined });
+    setForm({
+      ...config,
+      maxSteps: undefined,
+      maxEvalBatches: undefined,
+      kind: undefined,
+    });
+    // A run replaces the live session: a load still in flight stops.
+    activation.current++;
+    setActivating(null);
     setSelected(config.dataset);
     let device: Device | undefined;
     try {
@@ -719,23 +729,25 @@ export default function Lab({ locale }: { locale: Locale }) {
   }
   runRef.current = runTraining;
 
-  /** Rebuild a saved model on the one live device, load its parameters and make it the session. */
+  /** Rebuild a saved model on the one live device, on the tier the form shows, load its parameters and make it the session. */
   async function activateModel(id: string) {
     const saved = models[id];
     if (!saved || runningRef.current) return;
     const token = ++activation.current;
+    const stale = () => token !== activation.current || runningRef.current;
     setActivating(id);
     let device: Device | undefined;
     try {
       const data = await ensureData(id);
       const nn = await NN_PROMISE();
-      if (token !== activation.current) return;
+      if (stale()) return;
       const previous = sessionRef.current;
       sessionRef.current = null;
       setSession(null);
       if (previous) await previous.device.dispose();
       releaseDatasets(id);
-      device = await nn.device({ device: saved.config.tier });
+      device = await nn.device({ device: form.tier });
+      if (stale()) return;
       const model = buildModel(saved.spec, nn).to(device);
       const parameters = model.parameters();
       if (parameters.length !== saved.params.length)
@@ -744,6 +756,8 @@ export default function Lab({ locale }: { locale: Locale }) {
         );
       for (let i = 0; i < parameters.length; i++)
         await parameters[i]!.assign(saved.params[i]!);
+      // Another selection or a run came in while the weights loaded: this model is not wanted.
+      if (stale()) return;
       model.eval();
       const next: Session = {
         runId: saved.runId,
@@ -758,7 +772,8 @@ export default function Lab({ locale }: { locale: Locale }) {
       setSession(next);
       device = undefined;
     } catch (cause) {
-      setNotice(cause instanceof Error ? cause.message : String(cause));
+      if (!stale())
+        setNotice(cause instanceof Error ? cause.message : String(cause));
     } finally {
       if (device) await device.dispose().catch(() => undefined);
       if (token === activation.current) setActivating(null);
@@ -772,6 +787,7 @@ export default function Lab({ locale }: { locale: Locale }) {
       tier: form.tier,
       maxSteps: 200,
       maxEvalBatches: 4,
+      kind: "quick",
     }).catch(() => undefined);
   }
 
@@ -784,7 +800,7 @@ export default function Lab({ locale }: { locale: Locale }) {
    * model is built and disposed afterwards.
    */
   async function captureGraph(kind: GraphKind) {
-    if (runningRef.current || graphBusy) return;
+    if (runningRef.current || graphBusy || activating !== null) return;
     setGraphBusy(kind);
     setGraphError(null);
     let fresh: Device | undefined;
@@ -909,7 +925,7 @@ export default function Lab({ locale }: { locale: Locale }) {
   }
 
   function selectDataset(id: string) {
-    if (running) return;
+    if (running || graphBusy) return;
     releaseDatasets(id);
     setSelected(id);
     setForm({ ...defaultConfig(id), tier: form.tier });
@@ -963,7 +979,7 @@ export default function Lab({ locale }: { locale: Locale }) {
                     className="lab-card-select"
                     aria-pressed={selected === d.id}
                     onClick={() => selectDataset(d.id)}
-                    disabled={running}
+                    disabled={running || graphBusy !== null}
                   >
                     <span className="lab-card-title">{d.title}</span>
                     <span className="lab-card-task">{d.task}</span>
@@ -1211,14 +1227,14 @@ export default function Lab({ locale }: { locale: Locale }) {
           <div className="lab-graph-actions">
             <Button
               onClick={() => void captureGraph("forward")}
-              disabled={running || graphBusy !== null}
+              disabled={running || graphBusy !== null || activating !== null}
               loading={graphBusy === "forward"}
             >
               {words.graphForward}
             </Button>
             <Button
               onClick={() => void captureGraph("step")}
-              disabled={running || graphBusy !== null}
+              disabled={running || graphBusy !== null || activating !== null}
               loading={graphBusy === "step"}
             >
               {words.graphStep}
@@ -1276,6 +1292,7 @@ export default function Lab({ locale }: { locale: Locale }) {
             <Table
               size="small"
               pagination={false}
+              scroll={{ x: "max-content" }}
               rowKey={(row) => `${row.finishedAt}-${row.config.dataset}`}
               dataSource={results}
               columns={[
@@ -1305,7 +1322,11 @@ export default function Lab({ locale }: { locale: Locale }) {
                 {
                   title: words.col.status,
                   render: (_, r) =>
-                    r.completed ? words.completed : words.stopped,
+                    r.completed
+                      ? words.completed
+                      : r.kind === "quick" && r.capped
+                        ? words.quickStatus.replace("{steps}", String(r.steps))
+                        : words.stopped,
                 },
               ]}
             />
