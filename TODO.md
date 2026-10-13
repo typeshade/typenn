@@ -317,7 +317,8 @@ the source for bounds and index calculations is open.
 
 ## Device-resident datasets
 
-Status: implemented on `claude/typenn-device-dataset`, with open items below. The README section
+Status: implemented on `claude/typenn-device-dataset`, with open items below. A step uploads no
+sample bytes: on the fake WebGPU device a step uploads 240 bytes at N=12 and at N=1200. The README section
 "Device-resident datasets" documents the API.
 
 Done:
@@ -333,9 +334,6 @@ Done:
 
 Open:
 
-- [ ] The permutation is re-sent on plans of a step, on the fake WebGPU device: about 4 bytes per
-      sample per step (N=1200 gives 6456 bytes per step, N=12 gives 516). The test
-      "a step's upload bytes do not grow" is a TODO until this is fixed. The cause is not found.
 - [ ] The device storage limit is read from the GPUDevice's limits when present, else 128 MiB.
       Not measured on a real GPU. When TypeShade reports the runtime limits (proposal 0051), the
       read moves to that API at the TODO in `device-dataset.ts`.

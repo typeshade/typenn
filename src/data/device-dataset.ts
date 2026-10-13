@@ -125,7 +125,6 @@ interface DeviceSplitState {
   readonly labels: Field;
   /** The row order of the split: the permutation the batches are taken from. */
   readonly perm: Resident<Uint32Array>;
-  readonly labelPerm?: Resident<Uint32Array>;
 }
 
 /** The split as the dataset holds it: the host copy, the order, and the device state if any. */
@@ -410,7 +409,6 @@ export class DeviceDataset {
     }
     this.splits.train.order.set(order);
     this.splits.train.device?.perm.write(order);
-    this.splits.train.device?.labelPerm?.write(order);
   }
 
   /**
@@ -477,7 +475,7 @@ export class DeviceDataset {
           );
     const labels = this.gatherChain(
       device.labels,
-      device.labelPerm ?? device.perm,
+      device.perm,
       offset,
       this.labelShape(count),
     );
@@ -491,15 +489,8 @@ export class DeviceDataset {
     start: number,
     shape: readonly number[],
   ): Tensor {
-    // A chain starts with an empty shard, which writes zeros that the shards overwrite. Every
-    // chain has at least two calls: a plan of one call re-sent the permutation on each step (the
-    // runtime's single-call path; measured with the fake WebGPU device, see the tests).
-    const empty: Field = {
-      ...field,
-      shards: [{ first: 0, rows: 0, words: this.empty() }],
-    };
     let previous: Tensor | undefined;
-    for (const shard of [...empty.shards, ...field.shards]) {
+    for (const shard of field.shards) {
       const node = {
         kind: "op",
         op: "gather",
@@ -667,7 +658,7 @@ export class DeviceDataset {
     return {
       split,
       order,
-      device: { input, labels, perm, labelPerm: this.keep(order) },
+      device: { input, labels, perm },
     };
   }
 
@@ -710,14 +701,6 @@ export class DeviceDataset {
       std: this.keep(stdArray),
     };
   }
-
-  /** A one-word array no sample reads: the words of the empty first shard of a gather chain. */
-  private empty(): Resident<Uint32Array> {
-    this.emptyWords ??= this.keep(new Uint32Array(1));
-    return this.emptyWords;
-  }
-
-  private emptyWords?: Resident<Uint32Array>;
 
   private keep<T extends Uint32Array | Float32Array>(array: T): Resident<T> {
     const handle = resident(array);

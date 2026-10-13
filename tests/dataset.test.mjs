@@ -377,13 +377,20 @@ test("residency: a sample larger than a shard is reported and batches are built 
   await device.dispose();
 });
 
-// Measures the upload bytes of one step, with the default single shard, at two sizes. A step that
-// uploads only scalars does not grow with N. The permutation is re-sent on the plans of a step, so
-// the bytes grow with N (about 4 bytes per sample). This stays a TODO until the runtime keeps the
-// permutation resident (see TODO.md).
+// Measures the uploads of one step with the fake WebGPU device. A step is one batch: its inputs and
+// its labels. Both are first used by the warm-up, since the first use of a Resident uploads it
+// (the permutation and the source words are uploaded once, at the first batch that reads them).
+// The step then sends scalars only: no upload is as large as one permutation, and the total does
+// not depend on N.
 const stepUploads = async (N) => {
   const fake = fakeGpu();
   const device = await nn.device({ device: "webgpu", gpuDevice: fake.device });
+  const sizes = [];
+  const writeBuffer = fake.device.queue.writeBuffer;
+  fake.device.queue.writeBuffer = (target, offset, data) => {
+    sizes.push(data.byteLength);
+    return writeBuffer(target, offset, data);
+  };
   const F = 8;
   const x = Uint8Array.from(ints(N * F, 256, 27));
   const y = Uint8Array.from(ints(N, 4, 28));
@@ -393,29 +400,74 @@ const stepUploads = async (N) => {
     test: { count: N, x, y },
   });
   try {
-    await dataset.batch(0, 4).input.data();
-    const warm = fake.stats;
+    const warm = dataset.batch(0, 4);
+    await warm.input.data();
+    await warm.labels.data();
+    const before = fake.stats.uploadBytes;
+    sizes.length = 0;
     const step = dataset.batch(4, 4);
     await step.input.data();
     await step.labels.data();
-    return fake.stats.uploadBytes - warm.uploadBytes;
+    return {
+      bytes: fake.stats.uploadBytes - before,
+      largest: Math.max(0, ...sizes),
+    };
   } finally {
     dataset.dispose();
     await device.dispose();
   }
 };
-test(
-  "fake WebGPU: a step's upload bytes do not grow with the dataset size",
-  { todo: "open: the permutation is re-sent on each plan of a step" },
-  async () => {
-    const small = await stepUploads(12);
-    const large = await stepUploads(1200);
-    console.log(
-      `fake WebGPU: a step uploads ${small} bytes at N=12 and ${large} bytes at N=1200`,
-    );
-    assert.ok(
-      large < small + 1024,
-      `a step uploads ${large} bytes at N=1200, ${small} at N=12`,
-    );
-  },
-);
+test("fake WebGPU: a step's upload bytes do not grow with the dataset size", async () => {
+  const small = await stepUploads(12);
+  const large = await stepUploads(1200);
+  console.log(
+    `fake WebGPU: a step uploads ${small.bytes} bytes at N=12 and ${large.bytes} bytes at N=1200`,
+  );
+  assert.equal(
+    large.bytes,
+    small.bytes,
+    `a step uploads ${large.bytes} bytes at N=1200, ${small.bytes} at N=12`,
+  );
+  // One permutation of N=1200 is 4800 bytes and the sources are larger: no upload is that size.
+  assert.ok(
+    large.largest < 1024,
+    `the largest upload is ${large.largest} bytes`,
+  );
+});
+
+test("fake WebGPU: an epoch uploads one permutation, and a second epoch in the same order none", async () => {
+  const N = 1200;
+  const F = 8;
+  const fake = fakeGpu();
+  const device = await nn.device({ device: "webgpu", gpuDevice: fake.device });
+  const sizes = [];
+  const writeBuffer = fake.device.queue.writeBuffer;
+  fake.device.queue.writeBuffer = (target, offset, data) => {
+    sizes.push(data.byteLength);
+    return writeBuffer(target, offset, data);
+  };
+  const x = Uint8Array.from(ints(N * F, 256, 31));
+  const y = Uint8Array.from(ints(N, 4, 32));
+  const dataset = device.dataset({
+    inputs: { kind: "images", features: F },
+    train: { count: N, x, y },
+    test: { count: N, x, y },
+  });
+  try {
+    const epoch = async () => {
+      sizes.length = 0;
+      for (const batch of dataset.batches(300)) {
+        await batch.input.data();
+        await batch.labels.data();
+      }
+      return sizes.filter((size) => size === N * 4).length;
+    };
+    await epoch(); // the first use uploads the identity order, the sources and the scalars
+    dataset.shuffle(5);
+    assert.equal(await epoch(), 1, "one permutation after shuffle()");
+    assert.equal(await epoch(), 0, "no permutation without a new order");
+  } finally {
+    dataset.dispose();
+    await device.dispose();
+  }
+});
