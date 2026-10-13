@@ -1,0 +1,45 @@
+name: deploy
+
+# typenn.typeshade.dev: the library's site (website/), built to website/dist and deployed to
+# Cloudflare Workers on every push to `main` (wrangler.jsonc). Without the CLOUDFLARE_API_TOKEN
+# secret the job says so and passes.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  cloudflare:
+    name: cloudflare
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: cloudflare
+      url: https://typenn.typeshade.dev/
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            website/package-lock.json
+      - name: Build the TypeNN runtime
+        run: npm ci && npm run build
+      - name: Build the site
+        run: cd website && npm ci && npm run build
+      - name: Deploy website/dist
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "::notice::No CLOUDFLARE_API_TOKEN secret; the site is not deployed."
+            exit 0
+          fi
+          npx wrangler deploy
