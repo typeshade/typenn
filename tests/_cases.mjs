@@ -601,6 +601,13 @@ const SOFTMAX_AXES = [
   [[2, 3, 4], 0],
   [[2, 3, 4], 1],
   [[2, 3, 4], 2],
+  // First two-pass axis and its immediate predecessor: protect the crossover.
+  [[2, 63], 1],
+  [[2, 64], 1],
+  [[2, 65], -1],
+  // Non-innermost long axis: the slice stride must be preserved.
+  [[2, 129, 3], 1],
+  [[1, 257], -1],
 ];
 
 /** @returns {Case[]} */
