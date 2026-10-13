@@ -171,28 +171,53 @@ def sha256_file(path: str) -> str:
     return digest.hexdigest()
 
 
+DOWNLOAD_ATTEMPTS = 3
+
+
+def download(name: str, url: str, path: str) -> None:
+    """Download one source to `path`. A failed transfer is retried, up to DOWNLOAD_ATTEMPTS times."""
+    partial = path + ".part"
+    for attempt in range(1, DOWNLOAD_ATTEMPTS + 1):
+        print(f"  download {name} (attempt {attempt}/{DOWNLOAD_ATTEMPTS})", flush=True)
+        try:
+            request = urllib.request.Request(url, headers={"User-Agent": "typenn-site-datasets/1"})
+            with urllib.request.urlopen(request, timeout=120) as response, open(partial, "wb") as out:
+                while True:
+                    block = response.read(1 << 20)
+                    if not block:
+                        break
+                    out.write(block)
+            os.replace(partial, path)
+            return
+        except OSError as error:  # URLError, HTTPError, timeouts and socket resets
+            if os.path.exists(partial):
+                os.remove(partial)
+            if attempt == DOWNLOAD_ATTEMPTS:
+                raise SystemExit(f"download of {name} failed {DOWNLOAD_ATTEMPTS} times: {error}") from error
+            print(f"  {name}: {error}; retrying", flush=True)
+
+
 def fetch(name: str, cache: str) -> str:
-    """Return the cached path of a source file, downloading it when absent."""
+    """Return the cached path of a source file, downloading it when absent.
+
+    A cached file whose SHA-256 does not match is deleted and downloaded once more. A second
+    mismatch fails: the source changed, or the table is wrong.
+    """
     url, expected, origin = SOURCES[name]
     path = os.path.join(cache, name)
-    if not os.path.exists(path):
-        print(f"  download {name}", flush=True)
-        partial = path + ".part"
-        request = urllib.request.Request(url, headers={"User-Agent": "typenn-site-datasets/1"})
-        with urllib.request.urlopen(request, timeout=120) as response, open(partial, "wb") as out:
-            while True:
-                block = response.read(1 << 20)
-                if not block:
-                    break
-                out.write(block)
-        os.replace(partial, path)
-    actual = sha256_file(path)
-    if actual != expected:
-        raise SystemExit(
-            f"SHA-256 mismatch for {name} ({origin}): expected {expected}, got {actual}. "
-            f"Delete {path} if the source changed on purpose, then update the table."
-        )
-    return path
+    for attempt in (1, 2):
+        if not os.path.exists(path):
+            download(name, url, path)
+        actual = sha256_file(path)
+        if actual == expected:
+            return path
+        if attempt == 1:
+            print(f"  {name}: SHA-256 mismatch (got {actual}); deleting and downloading again", flush=True)
+            os.remove(path)
+    raise SystemExit(
+        f"SHA-256 mismatch for {name} ({origin}): expected {expected}, got {actual}. "
+        f"Delete {path} if the source changed on purpose, then update the table."
+    )
 
 
 def read_bytes(name: str, cache: str) -> bytes:

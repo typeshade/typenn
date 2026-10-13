@@ -66,6 +66,37 @@ keeps every output file at 20 MiB or less and splits larger arrays into `.partN.
 The text datasets use the Keras loader's split, seed 113 and token encoding. Their token ids
 are `uint16` and the vocabulary is capped at 10000 words for the bag-of-words input.
 
+## Training lab
+
+`/lab/` and `/ko/lab/` train TypeNN models in the browser on the full training split of each
+dataset. The page loads the mirrored data, trains with `Module`, `Sequential`, `Linear`, `Conv2d`
+and `MaxPool2d` (site-defined over `Tensor.conv2d` and `Tensor.maxPool`), the losses and the Adam
+or SGD optimizer, and evaluates on the full test split after each epoch. `src/lab/train.ts` holds
+the training loop, `src/lab/datasets.ts` the loader and `src/components/Lab.tsx` the page.
+
+The CNN preset uses `Conv2d` and `MaxPool2d`. The TypeNN declarations do not export them, so
+`src/lab/train.ts` defines both as `Module` subclasses. It creates their trainable leaves with the
+runtime's `createParameter`, as TypeNN's own `Linear` does.
+
+### Lab automation
+
+The page exposes `window.__typennLab`. Its `run` method uses the same code path as the Start
+button, and it updates the page too:
+
+```ts
+interface LabApi {
+  ready: Promise<void>; // resolves when the island has mounted
+  datasets(): Promise<DatasetInfo[]>; // the entries of /data/index.json
+  run(config: Partial<RunConfig> & { dataset: string }): Promise<RunResult>; // missing fields take the dataset defaults
+  stop(): void; // stops after the current step; the result has completed: false
+  readonly results: RunResult[]; // the finished and stopped runs of this page, oldest first
+}
+```
+
+A `RunResult` holds `config`, `tier`, `epochs` (`trainLoss` and `test` for each epoch), `steps`,
+`samplesSeen`, `seconds`, `test`, `completed`, `userAgent`, `typennCommit` and `finishedAt`.
+`typennCommit` comes from `src/vendor/typenn/version.json`, which `npm run sync:typenn` writes.
+
 ## Project documents
 
 `PRODUCT.md` and `DESIGN.md` describe verified capabilities, current limits, the page structure,

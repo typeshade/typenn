@@ -1,23 +1,167 @@
+// Declarations for the vendored TypeNN browser runtime (index.js). The website keeps this file
+// narrow: it lists the exports the Playground and the Lab import, with the signatures of the
+// compiled declarations in the TypeNN build (dist/types) that they use.
+
 export interface Tensor {
+  readonly device: Device;
   readonly shape: readonly number[];
-  matmul(other: Tensor): Tensor;
+  readonly requiresGrad: boolean;
   add(other: Tensor): Tensor;
+  sub(other: Tensor): Tensor;
+  mul(other: Tensor): Tensor;
+  matmul(other: Tensor): Tensor;
   relu(): Tensor;
+  softmax(axis?: number): Tensor;
+  conv2d(
+    filter: Tensor,
+    options?: {
+      readonly strides?: number;
+      readonly padding?: "valid" | "same";
+    },
+  ): Tensor;
+  maxPool(options: {
+    readonly filterSize: number;
+    readonly strides?: number;
+  }): Tensor;
+  reshape(shape: readonly number[]): Tensor;
   data(): Promise<Float32Array>;
+  backward(upstream?: Tensor): Promise<void>;
   disposeGraph(preserve?: readonly Tensor[]): Promise<void>;
+}
+
+export interface FuseReport {
+  readonly tier: string;
+  readonly dispatches: number;
+  readonly submissions: number;
+  readonly groups: readonly {
+    readonly calls: readonly string[];
+    readonly fused: boolean;
+  }[];
+}
+
+export interface DevicePlan {
+  readonly report: FuseReport;
+  readonly nodes: readonly number[];
 }
 
 export interface Device {
   readonly backend: {
+    readonly provider: "typeshade";
     readonly name: "cpu" | "webgpu" | "webgl2";
     readonly fallbackReason?: string;
   };
-  /** The plan of the last data(): tier, dispatches, submissions and groups of calls. */
-  readonly lastReport?: { readonly tier: string; readonly dispatches: number; readonly submissions: number };
-  tensor(values: ArrayLike<number>, options: { readonly shape: readonly number[] }): Tensor;
+  /** The report of the last plan a `data()` ran. */
+  readonly lastReport?: FuseReport;
+  /** The last plan, with the graph id of each kernel call. */
+  readonly lastPlan?: DevicePlan;
+  tensor(
+    values: ArrayLike<number>,
+    options: { readonly shape: readonly number[] },
+  ): Tensor;
   dispose(): Promise<void>;
 }
 
 export type DevicePreference = "auto" | "cpu" | "webgpu" | "webgl2";
 
-export function device(options?: { readonly device?: DevicePreference } | DevicePreference): Promise<Device>;
+export function device(
+  options?: { readonly device?: DevicePreference } | DevicePreference,
+): Promise<Device>;
+
+export abstract class Module {
+  abstract forward(input: Tensor): Tensor;
+  to(device: Device): this;
+  parameters(): Tensor[];
+  train(): this;
+  eval(): this;
+  isTraining(): boolean;
+}
+
+export class Sequential extends Module {
+  readonly layers: readonly Module[];
+  constructor(...layers: Module[]);
+  forward(input: Tensor): Tensor;
+}
+
+export class Linear extends Module {
+  readonly inFeatures: number;
+  readonly outFeatures: number;
+  constructor(
+    inFeatures: number,
+    outFeatures: number,
+    options?: { readonly seed?: number; readonly weightScale?: number },
+  );
+  forward(input: Tensor): Tensor;
+}
+
+export class Dense extends Linear {}
+
+export class ReLU extends Module {
+  forward(input: Tensor): Tensor;
+}
+
+export class Tanh extends Module {
+  forward(input: Tensor): Tensor;
+}
+
+export class Sigmoid extends Module {
+  forward(input: Tensor): Tensor;
+}
+
+export class Dropout extends Module {
+  readonly rate: number;
+  constructor(rate: number, options?: { readonly seed?: number });
+  forward(input: Tensor): Tensor;
+}
+
+export class Flatten extends Module {
+  forward(input: Tensor): Tensor;
+}
+
+export class CrossEntropyLoss {
+  readonly reduction: "none" | "sum" | "mean";
+  constructor(options?: { readonly reduction?: "none" | "sum" | "mean" });
+  forward(logits: Tensor, labels: ArrayLike<number>): Tensor;
+}
+
+export class MSELoss {
+  forward(prediction: Tensor, target: Tensor | Float32Array): Tensor;
+}
+
+export interface Optimizer {
+  readonly parameters: readonly Tensor[];
+  zeroGrad(): Promise<void>;
+  step(): Promise<void>;
+}
+
+export const optim: {
+  SGD(
+    parameters: readonly Tensor[],
+    options: { readonly lr: number },
+  ): Optimizer;
+  Adam(
+    parameters: readonly Tensor[],
+    options: {
+      readonly lr: number;
+      readonly beta1?: number;
+      readonly beta2?: number;
+      readonly epsilon?: number;
+    },
+  ): Optimizer;
+};
+
+export interface GraphNode {
+  readonly id: number;
+  readonly kind: "input" | "op";
+  readonly op: string;
+  readonly shape: readonly number[];
+  readonly inputs: readonly number[];
+  readonly parameter: boolean;
+  readonly computed: boolean;
+}
+
+export interface GraphSnapshot {
+  readonly output: number;
+  readonly nodes: readonly GraphNode[];
+}
+
+export function graph(tensor: Tensor): GraphSnapshot;

@@ -41,6 +41,15 @@ export interface Manifest {
   classes: string[] | null;
   features?: string[];
   vocabulary?: number;
+  vocabularyFile?: PartRef;
+  tokenEncoding?: {
+    start_char: number;
+    oov_char: number;
+    index_from: number;
+    num_words: number;
+  };
+  target?: string;
+  sources?: { file: string; url: string; sha256: string; origin: string }[];
   normalization?: { basis: "train"; mean: number[]; std: number[] };
   splits: { train: SplitRef; test: SplitRef };
 }
@@ -124,6 +133,35 @@ export async function loadDataset(
   const train = readSplit("train");
   const test = readSplit("test");
   return { info, manifest, train, test };
+}
+
+/** The manifest of one dataset, without its parts. Small: used for the cards. */
+export async function loadManifest(
+  id: string,
+  signal?: AbortSignal,
+): Promise<Manifest> {
+  return (await fetchJson(`/data/${id}/manifest.json`, signal)) as Manifest;
+}
+
+/** True when every part of the dataset is in the browser's cache already. False without Cache API. */
+export async function isCached(
+  id: string,
+  manifest: Manifest,
+): Promise<boolean> {
+  const cache = await openCache();
+  if (!cache) return false;
+  const base = `/data/${id}/`;
+  for (const split of ["train", "test"] as const) {
+    const s = manifest.splits[split];
+    for (const field of [s.x, s.y, s.offsets]) {
+      if (!field) continue;
+      for (const ref of field.parts) {
+        const hit = await cache.match(base + ref.file).catch(() => undefined);
+        if (!hit) return false;
+      }
+    }
+  }
+  return true;
 }
 
 // ---------------------------------------------------------------- batch helpers
