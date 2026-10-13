@@ -328,28 +328,35 @@ export async function kerasCached(id: KerasId): Promise<boolean> {
   return true;
 }
 
+/**
+ * Read a response body into one buffer sized from the pinned length, so a 26 MB file is not held
+ * twice. A body longer than the pinned length is refused. A shorter one fails the SHA-256 check.
+ */
 async function readBody(
   response: Response,
+  expected: number,
   onChunk: (bytes: number) => void,
 ): Promise<Uint8Array> {
-  if (!response.body) return new Uint8Array(await response.arrayBuffer());
+  if (!response.body) {
+    const whole = new Uint8Array(await response.arrayBuffer());
+    onChunk(whole.byteLength);
+    return whole;
+  }
   const reader = response.body.getReader();
-  const parts: Uint8Array[] = [];
+  const out = new Uint8Array(expected);
   let total = 0;
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
-    parts.push(value);
+    if (total + value.byteLength > expected) {
+      await reader.cancel().catch(() => undefined);
+      throw new Error(`the body is longer than the pinned ${expected} bytes`);
+    }
+    out.set(value, total);
     total += value.byteLength;
     onChunk(value.byteLength);
   }
-  const out = new Uint8Array(total);
-  let at = 0;
-  for (const part of parts) {
-    out.set(part, at);
-    at += part.byteLength;
-  }
-  return out;
+  return total === expected ? out : out.subarray(0, total);
 }
 
 /** One source file: from the Cache API when it is there and verifies, else from the network. */
@@ -373,13 +380,13 @@ async function fetchSource(
   }
   const response = await fetch(url, { signal });
   if (!response.ok) throw new Error(`${name}: HTTP ${response.status}`);
-  const bytes = await readBody(response, onChunk);
+  const bytes = await readBody(response, KERAS_SOURCES[name]!.bytes, onChunk);
   await verifySource(name, bytes);
   if (cache) {
     cache
       .put(
         url,
-        new Response(bytes.slice(0), {
+        new Response(bytes as BufferSource, {
           headers: { "Content-Type": "application/octet-stream" },
         }),
       )
@@ -410,18 +417,32 @@ export async function loadKerasDataset(
   );
   let loaded = 0;
   onProgress?.(0, total);
-  const bytes = await Promise.all(
-    spec.files.map((name) =>
-      fetchSource(
-        name,
-        (n) => {
-          loaded += n;
-          onProgress?.(loaded, total);
-        },
-        signal,
+  // One failed file stops the other downloads of the same dataset.
+  const inner = new AbortController();
+  const forward = () => inner.abort(signal?.reason);
+  if (signal?.aborted) forward();
+  signal?.addEventListener("abort", forward, { once: true });
+  let bytes: Uint8Array[];
+  try {
+    bytes = await Promise.all(
+      spec.files.map((name) =>
+        fetchSource(
+          name,
+          (n) => {
+            loaded += n;
+            onProgress?.(loaded, total);
+          },
+          inner.signal,
+        ).catch((cause: unknown) => {
+          inner.abort(cause);
+          throw cause;
+        }),
       ),
-    ),
-  );
+    );
+  } finally {
+    signal?.removeEventListener("abort", forward);
+  }
+  signal?.throwIfAborted();
   const files = new Map(spec.files.map((name, i) => [name, bytes[i]!]));
   const decoded = await decodeKeras(id, files);
   const info = kerasDatasetInfos().find((d) => d.id === id)!;
@@ -798,8 +819,10 @@ export async function readNpz(bytes: Uint8Array): Promise<Map<string, Npy>> {
   for (let k = 0; k < count; k++) {
     if (view.getUint32(p, true) !== 0x02014b50)
       throw new Error("npz: bad central directory");
+    const flags = view.getUint16(p + 8, true);
     const method = view.getUint16(p + 10, true);
     const compressed = view.getUint32(p + 20, true);
+    const uncompressed = view.getUint32(p + 24, true);
     const nameLength = view.getUint16(p + 28, true);
     const extraLength = view.getUint16(p + 30, true);
     const commentLength = view.getUint16(p + 32, true);
@@ -807,16 +830,30 @@ export async function readNpz(bytes: Uint8Array): Promise<Map<string, Npy>> {
     const name = decoder.decode(bytes.subarray(p + 46, p + 46 + nameLength));
     p += 46 + nameLength + extraLength + commentLength;
     if (!name.endsWith(".npy")) continue;
+    // numpy writes zip64 only for members of 4 GiB or more. Sizes and offsets come from the central
+    // directory, so a data descriptor (flag bit 3) needs no special reading. The npz files of these
+    // datasets have neither (checked 2026-10-13).
+    if (
+      compressed === 0xffffffff ||
+      uncompressed === 0xffffffff ||
+      localOffset === 0xffffffff
+    )
+      throw new Error(`npz: ${name} needs zip64, which is not supported`);
+    if (flags & 1) throw new Error(`npz: ${name} is encrypted`);
     if (view.getUint32(localOffset, true) !== 0x04034b50)
       throw new Error(`npz: bad local header for ${name}`);
     const localName = view.getUint16(localOffset + 26, true);
     const localExtra = view.getUint16(localOffset + 28, true);
     const start = localOffset + 30 + localName + localExtra;
+    if (start + compressed > bytes.byteLength)
+      throw new Error(`npz: ${name} runs past the end of the file`);
     const data = bytes.subarray(start, start + compressed);
     let member: Uint8Array;
     if (method === 0) member = data;
     else if (method === 8) member = await inflate(data, "deflate-raw");
     else throw new Error(`npz: ${name} uses zip method ${method}`);
+    if (member.byteLength !== uncompressed)
+      throw new Error(`npz: ${name} has the wrong size after reading`);
     out.set(name.slice(0, -4), readNpy(member));
   }
   return out;
@@ -849,7 +886,15 @@ const ITEM_READERS: Record<
   "<i2": { size: 2, read: (v, at) => v.getInt16(at, true) },
   "<u4": { size: 4, read: (v, at) => v.getUint32(at, true) },
   "<i4": { size: 4, read: (v, at) => v.getInt32(at, true) },
-  "<i8": { size: 8, read: (v, at) => Number(v.getBigInt64(at, true)) },
+  "<i8": {
+    size: 8,
+    read: (v, at) => {
+      const value = Number(v.getBigInt64(at, true));
+      if (!Number.isSafeInteger(value))
+        throw new Error("npy: an int64 value is beyond 2^53");
+      return value;
+    },
+  },
   "<f4": { size: 4, read: (v, at) => v.getFloat32(at, true) },
   "<f8": { size: 8, read: (v, at) => v.getFloat64(at, true) },
 };
@@ -887,6 +932,8 @@ export function readNpy(bytes: Uint8Array): Npy {
     .map((s) => s.trim())
     .filter((s) => s.length > 0)
     .map((s) => Number(s));
+  if (shape.some((n) => !Number.isSafeInteger(n) || n < 0))
+    throw new Error(`npy: bad shape ${shapeText}`);
   const count = shape.reduce((a, b) => a * b, 1);
   const body = bytes.subarray(headerStart + headerLength);
   if (descr === "|O") {
@@ -903,7 +950,8 @@ export function readNpy(bytes: Uint8Array): Npy {
     kind: "numeric",
     descr,
     shape,
-    bytes: body.slice(0, count * reader.size),
+    // A view into the member, not a copy: a caller that keeps the array copies what it keeps.
+    bytes: body.subarray(0, count * reader.size),
   };
 }
 

@@ -46,9 +46,17 @@ file's SHA-256, caches the file in the Cache API and decodes it. The decoder rea
 `.npy` files, the pickle of numpy object arrays, and the IDX `.gz` files. It also repeats the Keras
 split with numpy's `RandomState` shuffle.
 
-CIFAR-10 and CIFAR-100 stay mirrored on this site. Their only source, cs.toronto.edu, does not allow
-cross-origin downloads. `scripts/fetch_datasets.py` builds the mirror under `public/data/`, and
-Cloudflare serves it at `/data/`. The deploy builds only the two CIFAR datasets:
+CIFAR-10 and CIFAR-100 are mirrored. Their only source, cs.toronto.edu, does not allow
+cross-origin downloads. The mirror is the R2 bucket `typenn-data`, prefix `datasets/v1/`
+(`index.json`, `cifar10/`, `cifar100/`). The bucket is served at
+`https://data.typeshade.dev/datasets/v1/`, and its CORS rule allows `https://nn.typeshade.dev`,
+`http://localhost:4321` and `http://127.0.0.1:4321`. `MIRROR_BASE` in `src/lab/datasets.ts` holds
+the URL. The site deploy builds and uploads no dataset. To rebuild the mirror:
+
+1. Run `npm run datasets`. It writes `cifar10/`, `cifar100/` and `index.json` under `public/data/`.
+2. Upload the contents of `public/data/` to the bucket `typenn-data` under `datasets/v1/`.
+3. Do not commit `public/data/`. A local build can read another mirror: set
+   `PUBLIC_TYPENN_DATA_BASE` (with a trailing slash) when you run `npm run build`.
 
 ```sh
 npm run datasets                              # cifar10 and cifar100, into public/data/
@@ -58,13 +66,17 @@ python3 scripts/fetch_datasets.py --only mnist
 
 The script needs Python 3 and numpy. It downloads each source to `.dataset-cache/` (skipped when
 present), checks its SHA-256 against a table in the script, and writes per dataset a
-`manifest.json` and binary parts. `public/data/index.json` lists the mirrored datasets. Cloudflare
-limits one static asset to 25 MiB, so the script keeps every output file at 20 MiB or less and
-splits larger arrays into `.partN.bin` files.
+`manifest.json` and binary parts. `public/data/index.json` lists the mirrored datasets. The script
+keeps every output file at 20 MiB or less and splits larger arrays into `.partN.bin` files.
 
-`npm run test:keras` checks the browser decoder against that mirror. It reads the source files
-from the cache and the parts from `public/data/`, and it needs both. It decodes each of the five
-datasets and compares every array byte for byte. Override the directories with
+`npm run test:keras` checks the browser decoder. It takes the five source files from
+`.dataset-cache/` when they are there, and downloads the missing ones from the Keras storage into a
+temporary directory (about 60 MB). It checks each file's SHA-256, decodes each dataset and compares
+the SHA-256 and the length of every array with `scripts/keras-expected.json`. CI runs it in the
+`cpu` job. The fixture comes from the mirror, which equals Keras 3.15.1 `load_data()` element for
+element. When the five mirrored datasets are in `public/data/` (`python3 scripts/fetch_datasets.py
+--all`), the test also compares the arrays with the mirror directly. Rebuild the fixture from the
+mirror with `npm run test:keras -- --write-fixture`. Override the directories with
 `TYPENN_DATASET_CACHE` and `TYPENN_DATASET_MIRROR`.
 
 | Dataset             | Source                                             | License and citation                                                                                                               |
@@ -83,7 +95,7 @@ are `uint16` and the vocabulary is capped at 10000 words for the bag-of-words in
 
 `/lab/` and `/ko/lab/` train TypeNN models in the browser on the full training split of each
 dataset. The page loads the five Keras datasets from the Keras storage and the CIFAR mirror from
-`/data/`, trains with `Module`, `Sequential`, `Linear`, `Conv2d`
+`data.typeshade.dev`, trains with `Module`, `Sequential`, `Linear`, `Conv2d`
 and `MaxPool2d` (site-defined over `Tensor.conv2d` and `Tensor.maxPool`), the losses and the Adam
 or SGD optimizer, and evaluates on the full test split after each epoch. `src/lab/train.ts` holds
 the training loop, `src/lab/datasets.ts` the loader for the mirror, `src/lab/keras.ts` the loader for the Keras storage, and

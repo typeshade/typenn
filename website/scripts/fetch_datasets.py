@@ -3,10 +3,11 @@
 
 The lab downloads mnist, fashion_mnist, imdb, reuters and california_housing directly from the
 Keras storage, through the JSON API URL (src/lab/keras.ts). Only cifar10 and cifar100 are
-mirrored: their only source has no cross-origin access. So the deploy builds the mirror of those
-two alone. The other five are built with --only or --all: scripts/test-keras-direct.mjs compares
-them with the browser's decoder byte for byte. Every output file is at most 20 MiB, because
-Cloudflare limits one static asset to 25 MiB.
+mirrored: their only source has no cross-origin access. So the mirror holds those
+two alone. They are uploaded to the R2 bucket typenn-data (prefix datasets/v1/, served at
+data.typeshade.dev); the deploy builds nothing. The other five are built with --only or --all:
+scripts/test-keras-direct.mjs compares them with the browser's decoder byte for byte. Every output file is at most 20 MiB, because
+Cloudflare limited one static asset to 25 MiB when the site served the mirror.
 
 Usage (from website/):
     python3 scripts/fetch_datasets.py [--only mnist,imdb] [--all] [--cache DIR] [--out DIR]
@@ -143,7 +144,7 @@ DATASET_IDS = [
     "mnist", "fashion_mnist", "cifar10", "cifar100",
     "imdb", "reuters", "california_housing",
 ]
-# The datasets the deploy mirrors. The other five are downloaded by the browser.
+# The datasets the mirror holds. The other five are downloaded by the browser.
 MIRRORED_IDS = ["cifar10", "cifar100"]
 
 

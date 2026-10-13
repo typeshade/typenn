@@ -1,4 +1,5 @@
-// Browser loader for the dataset mirror that scripts/fetch_datasets.py writes to /data/.
+// Browser loader for the dataset mirror that scripts/fetch_datasets.py builds and that is uploaded to
+// the R2 bucket behind MIRROR_BASE.
 // The pure helpers at the bottom take typed arrays and have no DOM dependency, so they run under
 // node in scripts/test-datasets.mjs.
 
@@ -79,13 +80,23 @@ export interface LoadOptions {
   signal?: AbortSignal;
 }
 
+/**
+ * Where the mirrored datasets (CIFAR-10 and CIFAR-100) are served: the R2 bucket `typenn-data`,
+ * prefix `datasets/v1/`, behind data.typeshade.dev (CORS allows nn.typeshade.dev and
+ * localhost:4321). A build can point it elsewhere with PUBLIC_TYPENN_DATA_BASE, for a local check.
+ * The value ends with a slash.
+ */
+export const MIRROR_BASE: string =
+  (import.meta as { env?: Record<string, string | undefined> }).env
+    ?.PUBLIC_TYPENN_DATA_BASE ?? "https://data.typeshade.dev/datasets/v1/";
+
 const CACHE_NAME = "typenn-datasets-v1";
 const CONCURRENCY = 4;
 
 export async function listDatasets(
   signal?: AbortSignal,
 ): Promise<DatasetInfo[]> {
-  const response = await fetch("/data/index.json", { signal });
+  const response = await fetch(MIRROR_BASE + "index.json", { signal });
   if (!response.ok) throw new Error(`index.json: HTTP ${response.status}`);
   const entries = (await response.json()) as Omit<DatasetInfo, "origin">[];
   return entries.map((entry) => ({ ...entry, origin: "mirror" as const }));
@@ -99,7 +110,7 @@ export async function loadDataset(
   const datasets = await listDatasets(signal);
   const info = datasets.find((d) => d.id === id);
   if (!info) throw new Error(`Unknown dataset: ${id}`);
-  const base = `/data/${id}/`;
+  const base = `${MIRROR_BASE}${id}/`;
   const manifest = (await fetchJson(
     base + "manifest.json",
     signal,
@@ -145,7 +156,10 @@ export async function loadManifest(
   id: string,
   signal?: AbortSignal,
 ): Promise<Manifest> {
-  return (await fetchJson(`/data/${id}/manifest.json`, signal)) as Manifest;
+  return (await fetchJson(
+    `${MIRROR_BASE}${id}/manifest.json`,
+    signal,
+  )) as Manifest;
 }
 
 /** True when every part of the dataset is in the browser's cache already. False without Cache API. */
@@ -155,7 +169,7 @@ export async function isCached(
 ): Promise<boolean> {
   const cache = await openCache();
   if (!cache) return false;
-  const base = `/data/${id}/`;
+  const base = `${MIRROR_BASE}${id}/`;
   for (const split of ["train", "test"] as const) {
     const s = manifest.splits[split];
     for (const field of [s.x, s.y, s.offsets]) {

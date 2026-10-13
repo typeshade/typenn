@@ -11,7 +11,8 @@
     "sync:typenn": "node scripts/sync-typenn-runtime.mjs",
     "datasets": "python3 scripts/fetch_datasets.py",
     "test:datasets": "node --experimental-strip-types scripts/test-datasets.mjs",
-    "test:keras": "node --experimental-strip-types scripts/test-keras-direct.mjs"
+    "test:keras": "node --experimental-strip-types scripts/test-keras-direct.mjs",
+    "test:graph": "node --experimental-strip-types --test scripts/test-graph-layout.mjs"
   },
   "dependencies": {
     "@astrojs/react": "^7.0.1",
