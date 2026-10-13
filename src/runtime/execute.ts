@@ -4,6 +4,7 @@ import { postOrder } from "../autograd/graph.js";
 import { copy } from "../kernels/map.shade.ts";
 import type { OpNode } from "../tensor/node.js";
 import { sizeOf } from "../tensor/shape.js";
+import { graphId } from "../tensor/inspect.js";
 import type { Tensor } from "../tensor/tensor.js";
 
 /** What the executor asks of the device that owns the arrays. */
@@ -12,8 +13,8 @@ export interface Memory {
   keep(values: Float32Array): Resident<Float32Array>;
   /** Free an array made by `keep`. */
   drop(array: Resident<Float32Array>): void;
-  /** Keep the report of a plan. */
-  record(report: FuseReport): void;
+  /** Keep the report of a plan, and the graph id of each of its kernel calls, in call order. */
+  record(report: FuseReport, nodes: readonly number[]): void;
 }
 
 /**
@@ -50,18 +51,21 @@ async function plan(pending: readonly Tensor[], memory: Memory): Promise<void> {
         input.storage = memory.keep(input.node.value);
     tensor.storage = memory.keep(new Float32Array(sizeOf(tensor.shape)));
   }
+  // The graph id of each kernel call of the scope, in call order. A scratch copy takes the id of
+  // the operation that reads it.
+  const nodes: number[] = [];
   try {
     memory.record(
       await fuse((scope) => {
         for (const tensor of pending) {
           const node = tensor.node as OpNode;
-          node.kernel(
-            tensor.storage,
-            ...distinct(scope, node.inputs),
-            ...node.values,
-          );
+          const id = graphId(tensor);
+          const inputs = distinct(scope, node.inputs, () => nodes.push(id));
+          nodes.push(id);
+          node.kernel(tensor.storage, ...inputs, ...node.values);
         }
       }),
+      nodes,
     );
   } catch (error) {
     // The arrays hold nothing a later read can use: the next `data()` computes them again.
@@ -81,6 +85,7 @@ async function plan(pending: readonly Tensor[], memory: Memory): Promise<void> {
 function distinct(
   scope: FuseScope,
   inputs: readonly Tensor[],
+  onCopy: () => void,
 ): Resident<Float32Array>[] {
   const seen = new Set<Resident<Float32Array>>();
   return inputs.map((input) => {
@@ -90,6 +95,7 @@ function distinct(
       return array;
     }
     const twin = scope.scratch(sizeOf(input.shape));
+    onCopy();
     copy(twin, array);
     return twin;
   });

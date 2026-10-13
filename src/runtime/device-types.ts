@@ -1,3 +1,11 @@
+import type { FuseReport } from "typeshade/fuse";
+
+/** The last plan of a device: its report, and the graph id of each kernel call, in call order. */
+export interface DevicePlan {
+  readonly report: FuseReport;
+  readonly nodes: readonly number[];
+}
+
 export type DevicePreference = "auto" | "webgpu" | "webgl2" | "cpu";
 export type ExecutionTier = "webgpu" | "webgl2" | "cpu";
 
