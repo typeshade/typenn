@@ -1,6 +1,6 @@
 # TypeNN website
 
-This is the source for [typenn.typeshade.dev](https://typenn.typeshade.dev). It is an Astro site
+This is the source for [nn.typeshade.dev](https://nn.typeshade.dev). It is an Astro site
 with React islands, TailwindCSS v4, and Ant Design v5. TensorFlow.js is used as an information
 architecture reference; the site's product claims and visual system are TypeNN-specific.
 
