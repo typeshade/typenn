@@ -45,7 +45,8 @@ export class Device {
       return array;
     },
     drop: (array) => {
-      this.live.delete(array);
+      // An array is destroyed once: not again after the device freed it.
+      if (!this.live.delete(array)) return;
       array.destroy();
     },
     record: (report, nodes) => {
@@ -210,6 +211,13 @@ export class Device {
     const array = source.storage;
     if (array === undefined)
       throw new Error("adopt() needs a tensor that a plan computed.");
+    try {
+      target.assertUsable();
+    } catch (error) {
+      // A disposed target takes no array: the computed one is freed, not leaked.
+      this.release(source);
+      throw error;
+    }
     this.release(target);
     target.storage = array;
     target.hostStale = true;

@@ -159,7 +159,13 @@ async function parity(device, kind, makeOptimizer, hostStep, options, steps) {
   return measure;
 }
 
-/** The bounds of the parity tests: 1e-5 scaled, and 2e-5 per element of size (see the record). */
+/**
+ * The bounds of the parity tests. The device update is f32 and the host algorithm is f64 until
+ * it rounds to f32, so the two differ by rounding. Accepted (decision of the owner's
+ * orchestrator): 2e-5 relative per element at least 1% of the parameter's magnitude, and 1e-5
+ * relative to the largest element of the parameter. Measured over 50 steps: 1.21e-5 per
+ * element and 5.7e-7 scaled for Adam, 6e-7 for SGD.
+ */
 function assertParity(measure) {
   assert.ok(measure.scaled <= 1e-5, `scaled difference ${measure.scaled}`);
   assert.ok(measure.element <= 2e-5, `element difference ${measure.element}`);

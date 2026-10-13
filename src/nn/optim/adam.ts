@@ -22,7 +22,7 @@ export class Adam extends Optimizer {
   readonly beta1: number;
   readonly beta2: number;
   readonly epsilon: number;
-  private readonly moments = new WeakMap<Tensor, Moments>();
+  private readonly moments = new Map<Tensor, Moments>();
   private iteration = 0;
 
   constructor(parameters: readonly Tensor[], options: AdamOptions) {
@@ -71,12 +71,30 @@ export class Adam extends Optimizer {
     );
     await device.computeAll([...updates, ...firsts, ...seconds]);
     // The plan is complete: the results replace the arrays they were computed from.
-    this.parameters.forEach((parameter, index) => {
-      device.adopt(moments[index]!.first, firsts[index]!);
-      device.adopt(moments[index]!.second, seconds[index]!);
-      device.adopt(parameter, updates[index]!);
-    });
+    try {
+      this.parameters.forEach((parameter, index) => {
+        device.adopt(moments[index]!.first, firsts[index]!);
+        device.adopt(moments[index]!.second, seconds[index]!);
+        device.adopt(parameter, updates[index]!);
+      });
+    } finally {
+      // An adoption that failed (a disposed parameter) leaves no computed array behind.
+      for (const tensor of [...updates, ...firsts, ...seconds])
+        device.release(tensor);
+    }
     this.iteration = iteration;
+  }
+
+  override async dispose(): Promise<void> {
+    // The moments hold no host value that a reader needs: free their arrays without a read-back.
+    for (const { first, second } of this.moments.values()) {
+      const device = first.device;
+      if (device.isDisposed()) break;
+      device.release(first);
+      device.release(second);
+    }
+    this.moments.clear();
+    this.iteration = 0;
   }
 
   /** The moments of a parameter, which start at zero. */

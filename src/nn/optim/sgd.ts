@@ -25,8 +25,13 @@ export class SGD extends Optimizer {
     );
     const device = this.parameters[0]!.device;
     await device.computeAll(updates);
-    this.parameters.forEach((parameter, index) =>
-      device.adopt(parameter, updates[index]!),
-    );
+    try {
+      this.parameters.forEach((parameter, index) =>
+        device.adopt(parameter, updates[index]!),
+      );
+    } finally {
+      // An adoption that failed (a disposed parameter) leaves no computed array behind.
+      for (const update of updates) device.release(update);
+    }
   }
 }

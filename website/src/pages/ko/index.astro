@@ -58,7 +58,7 @@ await device.dispose();`;
     </section>
 
     <section class="home-status" aria-labelledby="status-title">
-      <div><p class="eyebrow">현재 구현 상태</p><h2 id="status-title">모든 연산이 커널 함수입니다. 학습은 아직 최적화 전입니다.</h2><p><code>data()</code> 호출마다 TypeShade fuse 범위 하나가 실행되고, <code>device.lastReport</code>가 그 계획을 보여 줍니다. 옵티마이저는 아직 호스트 배열을 갱신하므로 Adam은 장치 커널이 아니며 타일 MatMul은 앞으로의 과제입니다.</p></div>
+      <div><p class="eyebrow">현재 구현 상태</p><h2 id="status-title">모든 연산이 커널 함수입니다. 학습은 아직 최적화 전입니다.</h2><p><code>data()</code> 호출마다 TypeShade fuse 범위 하나가 실행되고, <code>device.lastReport</code>가 그 계획을 보여 줍니다. SGD와 Adam은 파라미터를 장치에서 갱신합니다. 타일 MatMul은 앞으로의 과제입니다.</p></div>
       <a class="button button-quiet" href="https://github.com/typeshade/typenn/blob/main/TODO.md">구현 상태 보기 <span aria-hidden="true">↗</span></a>
     </section>
   </div>

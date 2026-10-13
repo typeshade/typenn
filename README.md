@@ -291,8 +291,14 @@ unsupported, and ask for the missing rule by name when called.
   A step reads no gradient back and uploads no parameter. The moments start at zero on the first
   step. A parameter keeps its Tensor object, and its host copy is read back on demand:
   `parameterValues()`, `data()` and `dispose()` do it. A layer's `weight` and `bias` arrays are the
-  host copy of its parameters. They are current after a read of the parameter, and after the
-  `fit()` of a Trainer. They are not updated after each step of an explicit loop.
+  host copy of its parameters. They lag behind the device, and `await model.sync()` refreshes the
+  arrays of every layer in one plan. The `fit()` of a Trainer does it at its end, also when the fit
+  fails.
+- `parameterValues()` is `async` and returns `Promise<Float32Array>`. It was synchronous, and it
+  returned the host array without a read. Add an `await` to each call. `Module.sync()` and
+  `Optimizer.dispose()` are new. `dispose()` frees the Adam moments on the device (the moments
+  also go with the device). `Device.dispose()` does not read the parameters back: call `sync()`
+  first when the host arrays must hold the trained values.
 - Tensor-graph autograd remains limited. Model serialization and WebNN are not implemented.
 - `shadeGrad`/`shadeGradCheck` operate on pure TypeShade functions only.
 

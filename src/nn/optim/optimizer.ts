@@ -28,11 +28,19 @@ export abstract class Optimizer {
   abstract step(): Promise<void>;
 
   /**
+   * Free the arrays the optimizer holds on the device besides the parameters (the moments of
+   * Adam). The parameters and the device are not disposed. Call it when the optimizer is no
+   * longer used and the device lives on. A later `step()` starts the state again from zero.
+   */
+  async dispose(): Promise<void> {}
+
+  /**
    * The gradient tensor of each parameter, not yet read. `step()` computes them on the device in
    * the plan of its update. Throws when `backward()` has not run.
    */
   protected gradientTensors(): Tensor[] {
     return this.parameters.map((parameter) => {
+      parameter.assertUsable();
       if (!parameter.grad)
         throw new Error("Call backward() before optimizer.step().");
       return parameter.grad;

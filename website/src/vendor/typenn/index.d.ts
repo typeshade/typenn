@@ -75,6 +75,8 @@ export abstract class Module {
   abstract forward(input: Tensor): Tensor;
   to(device: Device): this;
   parameters(): Tensor[];
+  /** Refresh the host arrays of the layers (`weight`, `bias`) from the device, in one plan. */
+  sync(): Promise<void>;
   train(): this;
   eval(): this;
   isTraining(): boolean;
@@ -171,6 +173,8 @@ export interface Optimizer {
   readonly parameters: readonly Tensor[];
   zeroGrad(): Promise<void>;
   step(): Promise<void>;
+  /** Free the arrays the optimizer holds on the device besides the parameters. */
+  dispose(): Promise<void>;
 }
 
 export const optim: {
