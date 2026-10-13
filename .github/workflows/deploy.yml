@@ -44,6 +44,8 @@ jobs:
         with:
           path: website/.dataset-cache
           key: datasets-${{ hashFiles('website/scripts/fetch_datasets.py') }}
+          # The script checks every file's SHA-256, so an older cache is safe to restore.
+          restore-keys: datasets-
       - name: Mirror the datasets under website/public/data
         run: cd website && npm run datasets
       - name: Build the site

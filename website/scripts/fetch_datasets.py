@@ -490,7 +490,7 @@ def cifar_images(raw: bytes, label_bytes: int) -> tuple[np.ndarray, np.ndarray]:
 
 
 def build_cifar(cache: str, out: str, dataset: str) -> dict:
-    license_text = "Released by Krizhevsky (2009) for research use; see cs.toronto.edu/~kriz/cifar.html."
+    license_text = "No explicit license. Published by Krizhevsky (2009) with the tech report, which the dataset page (cs.toronto.edu/~kriz/cifar.html) asks users to cite."
     citation = "Krizhevsky, Learning Multiple Layers of Features from Tiny Images, 2009."
     if dataset == "cifar10":
         source, label_bytes, title = "cifar-10-binary.tar.gz", 1, "CIFAR-10 small images"
@@ -542,7 +542,7 @@ def build_imdb(cache: str, out: str) -> dict:
         "title": "IMDB movie reviews (sentiment)",
         "task": "text-classification",
         "sources": sources_json(["imdb.npz", "imdb_word_index.json"]),
-        "license": "The dataset is distributed for research use. Source: Maas et al. (2011), ai.stanford.edu/~amaas/data/sentiment.",
+        "license": "No explicit license that we know of. Released by Maas et al. (2011) with the ACL paper (ai.stanford.edu/~amaas/data/sentiment); cite it.",
         "citation": "Maas, Daly, Pham, Huang, Ng and Potts, Learning Word Vectors for Sentiment Analysis, ACL 2011.",
         "classes": ["negative", "positive"],
         "vocabulary": VOCABULARY,
@@ -564,7 +564,7 @@ def build_reuters(cache: str, out: str) -> dict:
         "title": "Reuters newswire topics",
         "task": "text-classification",
         "sources": sources_json(["reuters.npz", "reuters_word_index.json"]),
-        "license": "Reuters-21578 (distributed by Keras). Reuters-21578 is public domain under the terms of the Reuters distribution.",
+        "license": "Reuters-21578: Reuters Ltd. and Carnegie Group made the collection available for free distribution for research purposes (per its readme). Not a standard license.",
         "citation": "Reuters-21578, Text Categorization Test Collection, distribution 1.0 (David D. Lewis).",
         "classes": [str(i) for i in range(46)],
         "vocabulary": VOCABULARY,
@@ -615,7 +615,7 @@ def build_california(cache: str, out: str) -> dict:
         "title": "California housing prices (regression)",
         "task": "regression",
         "sources": sources_json(["california_housing.npz"]),
-        "license": "StatLib dataset, Pace and Barry (1997); distributed by Keras. Use it for research with attribution.",
+        "license": "StatLib dataset, Pace and Barry (1997), as distributed by Keras. We found no explicit license; cite the paper.",
         "citation": "Pace and Barry, Sparse Spatial Autoregressions, Statistics and Probability Letters, 1997 (StatLib).",
         "classes": None,
         "features": CALIFORNIA_FEATURES,

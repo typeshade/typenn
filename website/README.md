@@ -54,14 +54,14 @@ present), checks its SHA-256 against a table in the script, and writes per datas
 runs the script before the build. Cloudflare limits one static asset to 25 MiB, so the script
 keeps every output file at 20 MiB or less and splits larger arrays into `.partN.bin` files.
 
-| Dataset | Source | License and citation |
-| --- | --- | --- |
-| MNIST | `mnist.npz` (Keras) | CC BY-SA 3.0, per the Keras documentation. LeCun, Cortes and Burges. |
-| Fashion-MNIST | the four IDX files (Keras base URL) | MIT, Zalando SE. Xiao, Rasul and Vollgraf, 2017. |
-| CIFAR-10, CIFAR-100 | the binary editions from cs.toronto.edu | Krizhevsky, 2009. |
-| IMDB | `imdb.npz` (Keras) | Maas et al., ACL 2011. Vocabulary capped at 10000 words. |
-| Reuters | `reuters.npz` (Keras) | Reuters-21578. Vocabulary capped at 10000 words. |
-| California housing | `california_housing.npz` (Keras) | StatLib, Pace and Barry, 1997. |
+| Dataset             | Source                                  | License and citation                                                                                                               |
+| ------------------- | --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| MNIST               | `mnist.npz` (Keras)                     | CC BY-SA 3.0, per the Keras documentation. LeCun, Cortes and Burges.                                                               |
+| Fashion-MNIST       | the four IDX files (Keras base URL)     | MIT, Zalando SE. Xiao, Rasul and Vollgraf, 2017.                                                                                   |
+| CIFAR-10, CIFAR-100 | the binary editions from cs.toronto.edu | No explicit license. Krizhevsky, 2009 (tech report; cite it).                                                                      |
+| IMDB                | `imdb.npz` (Keras)                      | No explicit license that we know of. Maas et al., ACL 2011. Vocabulary capped at 10000 words.                                      |
+| Reuters             | `reuters.npz` (Keras)                   | Reuters-21578: free distribution for research purposes, per its readme (not a standard license). Vocabulary capped at 10000 words. |
+| California housing  | `california_housing.npz` (Keras)        | StatLib, Pace and Barry, 1997. No explicit license found.                                                                          |
 
 The text datasets use the Keras loader's split, seed 113 and token encoding. Their token ids
 are `uint16` and the vocabulary is capped at 10000 words for the bag-of-words input.
