@@ -1,4 +1,4 @@
-// typenn.typeshade.dev on Cloudflare Workers: the library site (website/, built into
+// nn.typeshade.dev on Cloudflare Workers: the library site (website/, built into
 // website/dist by `npm run build` there) served as static assets, with no Worker code. It sits
 // beside typeshade.dev, gallery.typeshade.dev and radiance.typeshade.dev in the same account.
 // `.github/workflows/deploy.yml` deploys it from `main`.
@@ -10,7 +10,7 @@
   "compatibility_date": "2026-09-01",
   // The site answers at its own address only, not at a second workers.dev copy.
   "workers_dev": false,
-  "routes": [{ "pattern": "typenn.typeshade.dev", "custom_domain": true }],
+  "routes": [{ "pattern": "nn.typeshade.dev", "custom_domain": true }],
   "assets": {
     "directory": "./website/dist",
     "not_found_handling": "404-page",

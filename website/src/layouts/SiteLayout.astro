@@ -24,7 +24,8 @@ const links: { key: PageKey; en: string; ko: string; enHref: string; koHref: str
   { key: "lab", en: "Lab", ko: "실습", enHref: "/lab/", koHref: "/ko/lab/" },
   { key: "examples", en: "Examples", ko: "예제", enHref: "/examples/", koHref: "/ko/examples/" },
 ];
-const canonicalUrl = `https://typenn.typeshade.dev${Astro.url.pathname}`;
+const siteUrl = (path: string) => new URL(path, Astro.site).href;
+const canonicalUrl = siteUrl(Astro.url.pathname);
 const alternatePath = ko ? Astro.url.pathname.replace(/^\/ko(?=\/|$)/, "") || "/" : `/ko${Astro.url.pathname === "/" ? "/" : Astro.url.pathname}`;
 const alternateLabel = ko ? "English" : "한국어";
 const sidebarGroups = ko
@@ -49,9 +50,9 @@ const sidebarGroups = ko
     <link rel="icon" href="/mark.svg" type="image/svg+xml" />
     <meta name="theme-color" content="#f5f5f5" />
     <link rel="canonical" href={canonicalUrl} />
-    <link rel="alternate" hreflang="en" href={`https://typenn.typeshade.dev${ko ? alternatePath : Astro.url.pathname}`} />
-    <link rel="alternate" hreflang="ko" href={`https://typenn.typeshade.dev${ko ? Astro.url.pathname : alternatePath}`} />
-    <link rel="alternate" hreflang="x-default" href={`https://typenn.typeshade.dev${ko ? alternatePath : Astro.url.pathname}`} />
+    <link rel="alternate" hreflang="en" href={siteUrl(ko ? alternatePath : Astro.url.pathname)} />
+    <link rel="alternate" hreflang="ko" href={siteUrl(ko ? Astro.url.pathname : alternatePath)} />
+    <link rel="alternate" hreflang="x-default" href={siteUrl(ko ? alternatePath : Astro.url.pathname)} />
     <title>{title}</title>
   </head>
   <body>

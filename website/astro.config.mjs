@@ -3,7 +3,7 @@ import react from "@astrojs/react";
 import tailwindcss from "@tailwindcss/vite";
 
 export default defineConfig({
-  site: "https://typenn.typeshade.dev",
+  site: "https://nn.typeshade.dev",
   integrations: [react()],
   vite: {
     plugins: [tailwindcss()],

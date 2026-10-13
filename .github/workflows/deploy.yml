@@ -1,6 +1,6 @@
 name: deploy
 
-# typenn.typeshade.dev: the library's site (website/), built to website/dist and deployed to
+# nn.typeshade.dev: the library's site (website/), built to website/dist and deployed to
 # Cloudflare Workers on every push to `main` (wrangler.jsonc). Without the CLOUDFLARE_API_TOKEN
 # secret the job says so and passes.
 
@@ -20,7 +20,7 @@ jobs:
     timeout-minutes: 90
     environment:
       name: cloudflare
-      url: https://typenn.typeshade.dev/
+      url: https://nn.typeshade.dev/
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
     steps:

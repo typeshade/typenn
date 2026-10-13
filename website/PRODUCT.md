@@ -5,7 +5,7 @@
 web
 
 Astro static site with React islands, TailwindCSS v4, and Ant Design v5. English pages use `/`;
-Korean pages use `/ko/`. `typenn.typeshade.dev` is canonical and the `.com` host redirects to it.
+Korean pages use `/ko/`. The site is served at `nn.typeshade.dev` only; there is no redirect from any other host.
 
 ## Users
 
