@@ -249,7 +249,7 @@ export class Flatten extends Module {
 export class CrossEntropyLoss {
   readonly reduction: "none" | "sum" | "mean";
   constructor(options?: { readonly reduction?: "none" | "sum" | "mean" });
-  forward(logits: Tensor, labels: ArrayLike<number>): Tensor;
+  forward(logits: Tensor, labels: ArrayLike<number> | Tensor): Tensor;
 }
 
 export class MSELoss {
