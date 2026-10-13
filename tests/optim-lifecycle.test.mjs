@@ -55,9 +55,24 @@ const onCpu = (body) => async () => {
   }
 };
 
+/**
+ * Run `body` on a fake WebGPU device. `poolBytes` is the device's pool bound.
+ */
+/**
+ * The tests that count the arrays a step frees run with `poolBytes: 0`, which frees each array at
+ * once, as before the pool. The pool has its own tests in buffer-pool.test.mjs.
+ */
+const onFakeGpuUnpooled = (body, options = {}) =>
+  onFakeGpu(body, { ...options, poolBytes: 0 });
+
 async function onFakeGpu(body, options = {}) {
-  const gpu = fakeGpu(options);
-  const device = await nn.device({ device: "webgpu", gpuDevice: gpu.device });
+  const { poolBytes, ...gpuOptions } = options;
+  const gpu = fakeGpu(gpuOptions);
+  const device = await nn.device({
+    device: "webgpu",
+    gpuDevice: gpu.device,
+    ...(poolBytes === undefined ? {} : { poolBytes }),
+  });
   try {
     await body(device, gpu);
   } finally {
@@ -92,7 +107,7 @@ test("every array an optimizer step replaces is destroyed exactly once", async (
     (p) => nn.optim.Adam(p, { lr: 0.01 }),
     (p) => nn.optim.SGD(p, { lr: 0.1 }),
   ])
-    await onFakeGpu(async (device, gpu) => {
+    await onFakeGpuUnpooled(async (device, gpu) => {
       const destroys = countDestroys(gpu);
       const model = mlp().to(device);
       const parameters = model.parameters();
@@ -149,7 +164,7 @@ test("a parameter used twice in one graph gets one summed gradient and one updat
 });
 
 test("a step on a disposed parameter is refused and leaves no array behind", async () => {
-  await onFakeGpu(async (device, gpu) => {
+  await onFakeGpuUnpooled(async (device, gpu) => {
     const model = mlp().to(device);
     const parameters = model.parameters();
     const optimizer = nn.optim.Adam(parameters, { lr: 0.01 });
@@ -311,7 +326,7 @@ test("assign() on a stale parameter replaces the device value, and the next step
 test("a plan that fails leaves the parameters and the moments as they were, and the step runs again", async () => {
   // Find which popErrorScope call is the plan of the second step: one dry run counts them.
   let stepPop = 0;
-  await onFakeGpu(async (device, gpu) => {
+  await onFakeGpuUnpooled(async (device, gpu) => {
     let pops = 0;
     const pop = gpu.device.popErrorScope;
     gpu.device.popErrorScope = async () => (pops++, await pop());
@@ -328,7 +343,7 @@ test("a plan that fails leaves the parameters and the moments as they were, and 
     stepPop = base + 1;
     await second.disposeGraph(parameters);
   });
-  await onFakeGpu(
+  await onFakeGpuUnpooled(
     async (device, gpu) => {
       const model = mlp().to(device);
       const parameters = model.parameters();
@@ -437,7 +452,7 @@ test("the first Adam step starts the moments at zero", async () => {
 });
 
 test("the moments are freed by optimizer.dispose(), and two optimizers keep their own", async () => {
-  await onFakeGpu(async (device, gpu) => {
+  await onFakeGpuUnpooled(async (device, gpu) => {
     const model = mlp().to(device);
     const [layerA, , layerB] = model.modules().values();
     const parameters = model.parameters();

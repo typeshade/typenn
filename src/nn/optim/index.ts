@@ -1,8 +1,9 @@
 import type { Tensor } from "../../tensor/tensor.js";
 import { Adam, type AdamOptions } from "./adam.js";
 import { SGD, type SGDOptions } from "./sgd.js";
+import type { StepOptions } from "./optimizer.js";
 
-export { Adam, SGD, type AdamOptions, type SGDOptions };
+export { Adam, SGD, type AdamOptions, type SGDOptions, type StepOptions };
 
 export interface LegacySGDOptions {
   readonly learningRate: number;

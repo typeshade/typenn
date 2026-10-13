@@ -65,6 +65,7 @@ export {
   Adam,
   SGD,
   type AdamOptions,
+  type StepOptions,
   type SGDOptions as OptimizerSGDOptions,
 } from "./nn/optim/index.js";
 export {

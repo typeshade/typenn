@@ -219,6 +219,85 @@ async function trainBoth() {
   return { cpu, gpu };
 }
 
+/** The loss of 20 steps of the two models on WebGPU (SwiftShader), as `origin/main` 3a6ba27 computed
+ * them: the read before `backward()` and the Adam step of that commit. */
+const RECORDED_GPU_MLP = [
+  2.3285720348358154, 2.2661049365997314, 2.215897798538208, 2.1727631092071533,
+  2.097892999649048, 2.0505495071411133, 1.9738157987594604, 1.9186973571777344,
+  1.8722509145736694, 1.8110764026641846, 1.737915277481079, 1.7072733640670776,
+  1.6429568529129028, 1.5745967626571655, 1.4944705963134766,
+  1.4696835279464722, 1.407051920890808, 1.3253984451293945, 1.2298675775527954,
+  1.1899969577789307,
+];
+const RECORDED_GPU_CNN = [
+  2.3246567249298096, 2.264599561691284, 2.2140798568725586, 2.1559009552001953,
+  2.097506284713745, 2.041372537612915, 1.9855619668960571, 1.928479790687561,
+  1.8704768419265747, 1.8126192092895508, 1.755347490310669, 1.6983989477157593,
+  1.6415375471115112, 1.5848430395126343, 1.5285427570343018,
+  1.4727919101715088, 1.4176115989685059, 1.3630743026733398, 1.309317708015442,
+  1.2564539909362793,
+];
+
+/** Runs in the page: `steps` steps of one model with the loop `alsoRead` names, on WebGPU. */
+async function trainOnWebGPU({ model, steps, alsoRead }) {
+  const nn = await import("/dist/index.js");
+  const device = await nn.device("webgpu");
+  try {
+    let state = 7;
+    const next = () =>
+      (state = (Math.imul(state, 1664525) + 1013904223) >>> 0) / 2 ** 32;
+    const images = Float32Array.from({ length: 64 * 784 }, next);
+    const labels = Array.from({ length: 64 }, (_, row) => row % 10);
+    const net =
+      model === "mlp"
+        ? new nn.Sequential(
+            new nn.Flatten(),
+            new nn.Linear(784, 128, {
+              seed: 101,
+              weightScale: 1 / Math.sqrt(784),
+            }),
+            new nn.ReLU(),
+            new nn.Dropout(0.2),
+            new nn.Linear(128, 10, {
+              seed: 202,
+              weightScale: 1 / Math.sqrt(128),
+            }),
+          ).to(device)
+        : new nn.Sequential(
+            new nn.Conv2d(1, 8, { kernelSize: 3, seed: 5 }),
+            new nn.ReLU(),
+            new nn.MaxPool2d({ filterSize: 2 }),
+            new nn.Flatten(),
+            new nn.Linear(13 * 13 * 8, 10, { seed: 6 }),
+          ).to(device);
+    const shape = model === "mlp" ? [64, 1, 28, 28] : [64, 28, 28, 1];
+    const parameters = net.parameters();
+    const optimizer = nn.optim.Adam(parameters, { lr: 0.001 });
+    const criterion = new nn.CrossEntropyLoss();
+    const losses = [];
+    for (let step = 0; step < steps; step++) {
+      await optimizer.zeroGrad();
+      const loss = criterion.forward(
+        net.forward(device.tensor(images, { shape })),
+        labels,
+      );
+      if (alsoRead) {
+        await loss.backward();
+        const [values] = await optimizer.step({ alsoRead: [loss] });
+        losses.push(values[0]);
+      } else {
+        losses.push((await loss.data())[0]);
+        await loss.backward();
+        await optimizer.step();
+      }
+      await loss.disposeGraph(parameters);
+    }
+    return losses;
+  } finally {
+    await device.dispose();
+  }
+}
+
 test("the MNIST example trains on WebGPU as it trains on the CPU tier", async () => {
   const { result, logged } = await inPage(trainBoth);
   const { cpu, gpu } = result;
@@ -245,4 +324,21 @@ test("the MNIST example trains on WebGPU as it trains on the CPU tier", async ()
   assert.ok(gpu.accuracy > 0.6, `the accuracy ${gpu.accuracy}`);
   assert.equal(gpu.lastReport.tier, "webgpu");
   assert.deepEqual(logged, []);
+});
+
+test("a training step on WebGPU, with the pool and with alsoRead, gives the losses of origin/main, bit for bit", async () => {
+  for (const [model, recorded] of [
+    ["mlp", RECORDED_GPU_MLP],
+    ["cnn", RECORDED_GPU_CNN],
+  ]) {
+    for (const alsoRead of [false, true]) {
+      const { result, logged } = await inPage(trainOnWebGPU, {
+        model,
+        steps: 20,
+        alsoRead,
+      });
+      assert.deepEqual(result, recorded, `${model}, alsoRead ${alsoRead}`);
+      assert.deepEqual(logged, []);
+    }
+  }
 });
