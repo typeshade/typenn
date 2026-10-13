@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
-"""Mirror the Keras datasets that the TypeNN lab trains on, as browser-ready binary parts.
+"""Mirror the datasets that the TypeNN lab trains on, as browser-ready binary parts.
 
-The browser cannot fetch the Keras sources (they send no CORS headers), so the deploy builds
-this mirror under website/public/data/ and Cloudflare serves it at /data/. Every output file is
-at most 20 MiB, because Cloudflare limits one static asset to 25 MiB.
+The lab downloads mnist, fashion_mnist, imdb, reuters and california_housing directly from the
+Keras storage, through the JSON API URL (src/lab/keras.ts). Only cifar10 and cifar100 are
+mirrored: their only source has no cross-origin access. So the mirror holds those
+two alone. They are uploaded to the R2 bucket typenn-data (prefix datasets/v1/, served at
+data.typeshade.dev); the deploy builds nothing. The other five are built with --only or --all:
+scripts/test-keras-direct.mjs compares them with the browser's decoder byte for byte. Every output file is at most 20 MiB, because
+Cloudflare limited one static asset to 25 MiB when the site served the mirror.
 
 Usage (from website/):
-    python3 scripts/fetch_datasets.py [--only mnist,imdb] [--cache DIR] [--out DIR]
+    python3 scripts/fetch_datasets.py [--only mnist,imdb] [--all] [--cache DIR] [--out DIR]
 
 Sources and conventions:
 - mnist, imdb, reuters, california_housing: the .npz files and word indexes that
@@ -140,6 +144,8 @@ DATASET_IDS = [
     "mnist", "fashion_mnist", "cifar10", "cifar100",
     "imdb", "reuters", "california_housing",
 ]
+# The datasets the mirror holds. The other five are downloaded by the browser.
+MIRRORED_IDS = ["cifar10", "cifar100"]
 
 
 @dataclass
@@ -745,14 +751,22 @@ BUILDERS = {
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[1])
-    parser.add_argument("--only", help="comma-separated dataset ids, e.g. mnist,imdb")
+    parser.add_argument("--only", help="comma-separated dataset ids, e.g. mnist,imdb (default: the mirrored ones)")
+    parser.add_argument("--all", action="store_true", help="build all seven datasets, for the parity test")
     here = os.path.dirname(os.path.abspath(__file__))
     website = os.path.dirname(here)
     parser.add_argument("--cache", default=os.path.join(website, ".dataset-cache"))
     parser.add_argument("--out", default=os.path.join(website, "public", "data"))
     args = parser.parse_args(argv)
 
-    ids = DATASET_IDS if not args.only else [s.strip() for s in args.only.split(",") if s.strip()]
+    if args.all and args.only:
+        parser.error("--all and --only are exclusive")
+    if args.all:
+        ids = DATASET_IDS
+    elif args.only:
+        ids = [s.strip() for s in args.only.split(",") if s.strip()]
+    else:
+        ids = MIRRORED_IDS
     unknown = [i for i in ids if i not in BUILDERS]
     if unknown:
         parser.error(f"unknown dataset ids: {', '.join(unknown)}")
