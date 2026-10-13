@@ -26,11 +26,13 @@ import {
   type Manifest,
 } from "../lab/datasets";
 import KernelGraph from "./KernelGraph";
+import { mergeSnapshots, sampleIndices } from "../lab/graph-layout";
 import { encode, bagOf, wordIndex } from "../lab/text";
 import {
   buildModel,
   fillInputs,
   inputSize,
+  mulberry32,
   predict,
   presetsFor,
   specFor,
@@ -155,8 +157,12 @@ const text: { en: Record<string, any>; ko: Record<string, any> } = {
     graphFresh: "A new, untrained model with the selected preset.",
     graphTrained: "The trained model of this page.",
     graphEmpty: "Choose a button to draw the graph of a read.",
+    graphNoPlan2:
+      "This build of the library does not let the page read the gradients in one plan, so plan 2 is not shown.",
+    graphBatch:
+      "Batch: {n} random samples of the test split (seed {seed}). Parameter checksum before and after: {sum}.",
     graphStepNote:
-      "A training step can run more than one plan. Plan 1 holds the forward pass and the loss, read by data(). Plan 2 holds the gradients, if backward() runs a read of its own. Plan 2 has no graph view. Its groups are listed.",
+      "A training step reads twice. Plan 1 reads the loss. backward() only records the gradient operations. Plan 2 reads all gradients in one plan, as optimizer.step() does. This view runs plan 2 but does not update the parameters.",
     graphTab1: "Plan 1: loss",
     graphTab2: "Plan 2: gradients",
     graphForwardTab: "Plan: forward",
@@ -259,8 +265,12 @@ const text: { en: Record<string, any>; ko: Record<string, any> } = {
     graphFresh: "선택한 모델 구조로 새로 만든, 학습하지 않은 모델입니다.",
     graphTrained: "이 페이지에서 학습한 모델입니다.",
     graphEmpty: "버튼을 누르면 read의 그래프를 그립니다.",
+    graphNoPlan2:
+      "이 빌드의 라이브러리에서는 페이지가 기울기를 한 계획으로 읽을 수 없어서 계획 2를 표시하지 않습니다.",
+    graphBatch:
+      "배치: 테스트 분할에서 무작위로 고른 샘플 {n}개 (시드 {seed}). 전후 매개변수 체크섬: {sum}.",
     graphStepNote:
-      "학습 한 단계는 계획을 둘 이상 실행할 수 있습니다. 계획 1은 data()가 읽는 순방향과 손실을 담습니다. 계획 2는 backward()가 자체 읽기를 실행하면 기울기를 담습니다. 계획 2에는 그래프 보기가 없고 그룹만 나열합니다.",
+      "학습 한 단계는 읽기를 두 번 합니다. 계획 1은 손실을 읽습니다. backward()는 기울기 연산을 기록만 합니다. 계획 2는 optimizer.step()처럼 모든 기울기를 한 계획으로 읽습니다. 이 화면은 계획 2를 실행하지만 매개변수는 바꾸지 않습니다.",
     graphTab1: "계획 1: 손실",
     graphTab2: "계획 2: 기울기",
     graphForwardTab: "계획: 순방향",
@@ -392,6 +402,7 @@ export default function Lab({ locale }: { locale: Locale }) {
   const [graphBusy, setGraphBusy] = useState<GraphKind | null>(null);
   const [graphSource, setGraphSource] = useState<string | null>(null);
   const [graphKind, setGraphKind] = useState<GraphKind | null>(null);
+  const [graphBatch, setGraphBatch] = useState<string | null>(null);
   const [graphError, setGraphError] = useState<string | null>(null);
   const [results, setResults] = useState<RunResult[]>([]);
   const [runError, setRunError] = useState<string | null>(null);
@@ -572,9 +583,11 @@ export default function Lab({ locale }: { locale: Locale }) {
   runRef.current = runTraining;
 
   /**
-   * Draw the graph of one read. The forward reads the logits of one batch. The step reads the loss,
-   * then runs backward(), and keeps the plan of each read. A trained model of this page is used
-   * when its dataset is selected; otherwise a fresh model is built and disposed afterwards.
+   * Draw the graph of one read, on a seeded random batch of the test split. The forward reads the
+   * logits. The step reads the loss (plan 1), runs backward(), then reads all gradients in one
+   * plan (plan 2), as optimizer.step() does, but updates nothing. A trained model of this page is
+   * used when its dataset is selected, and its parameters stay bit-identical; otherwise a fresh
+   * model is built and disposed afterwards.
    */
   async function captureGraph(kind: GraphKind) {
     if (runningRef.current || graphBusy) return;
@@ -602,11 +615,15 @@ export default function Lab({ locale }: { locale: Locale }) {
       }
       const parameters = model.parameters();
       const wasTraining = model.isTraining();
-      const n = Math.min(config.batchSize, data.train.count);
-      const indices = Uint32Array.from({ length: n }, (_, i) => i);
+      const n = Math.min(config.batchSize, data.test.count);
+      const indices = sampleIndices(
+        data.test.count,
+        n,
+        mulberry32(config.seed),
+      );
       const size = inputSize(spec);
       const batch = fillInputs(
-        data.train,
+        data.test,
         indices,
         spec,
         new Float32Array(n * size),
@@ -615,6 +632,9 @@ export default function Lab({ locale }: { locale: Locale }) {
         shape: [n, ...spec.inputShape],
       });
       const source = trained ? t.graphTrained : t.graphFresh;
+      const before = await parameterChecksum(parameters);
+      // An optimizer that reads the gradients and updates nothing: zeroGrad() frees them.
+      const reader = nn.optim.SGD(parameters, { lr: 1 });
       try {
         if (kind === "forward") {
           model.eval();
@@ -626,6 +646,7 @@ export default function Lab({ locale }: { locale: Locale }) {
           setGraphTabs([{ title: t.graphForwardTab, snapshot, plan }]);
         } else {
           model.train();
+          await reader.zeroGrad();
           const logits = model.forward(input);
           const loss =
             spec.preset === "regression"
@@ -635,36 +656,52 @@ export default function Lab({ locale }: { locale: Locale }) {
                     logits,
                     Float32Array.from(
                       indices,
-                      (i) => (data.train.y[i]! - scale.mean) / scale.std,
+                      (i) => (data.test.y[i]! - scale.mean) / scale.std,
                     ),
                   );
                 })()
               : new nn.CrossEntropyLoss().forward(
                   logits,
-                  labels(data.train, indices),
+                  labels(data.test, indices),
                 );
           const snapshot = nn.graph(loss);
           await loss.data();
           const forwardPlan = device.lastPlan;
+          // backward() is lazy. optimizer.step() reads every gradient in one plan: plan 2.
           await loss.backward();
-          const gradientPlan =
-            device.lastPlan !== forwardPlan ? device.lastPlan : undefined;
+          const gradients = parameters.flatMap((p) => (p.grad ? [p.grad] : []));
+          const gradientSnapshot = mergeSnapshots(gradients.map(nn.graph));
+          const read = await readGradients(reader);
+          const gradientPlan = read ? device.lastPlan : undefined;
           await loss.disposeGraph(parameters);
+          await reader.zeroGrad();
           const tabs: GraphTab[] = [
             { title: t.graphTab1, snapshot, plan: forwardPlan },
           ];
-          if (gradientPlan)
+          if (gradientPlan && gradientPlan !== forwardPlan)
             tabs.push({
               title: t.graphTab2,
-              snapshot: null,
+              snapshot: gradientSnapshot,
               plan: gradientPlan,
             });
           setGraphTabs(tabs);
         }
+        const after = await parameterChecksum(parameters);
+        if (after !== before)
+          throw new Error(
+            `The parameters changed (checksum ${before} to ${after}).`,
+          );
         setGraphTab(0);
         setGraphKind(kind);
         setGraphSource(source);
+        setGraphBatch(
+          t.graphBatch
+            .replace("{n}", String(n))
+            .replace("{seed}", String(config.seed))
+            .replace("{sum}", after),
+        );
       } finally {
+        await reader.zeroGrad().catch(() => undefined);
         if (wasTraining) model.train();
         else model.eval();
       }
@@ -962,7 +999,7 @@ export default function Lab({ locale }: { locale: Locale }) {
               {words.graphReadme} ↗
             </a>
           </p>
-          <div className="lab-card-actions">
+          <div className="lab-graph-actions">
             <Button
               onClick={() => void captureGraph("forward")}
               disabled={running || graphBusy !== null}
@@ -978,7 +1015,11 @@ export default function Lab({ locale }: { locale: Locale }) {
               {words.graphStep}
             </Button>
           </div>
-          {graphSource && <p className="lab-note">{graphSource}</p>}
+          {graphSource && (
+            <p className="lab-note" data-testid="graph-source">
+              {graphSource} {graphBatch}
+            </p>
+          )}
           {graphError && (
             <p className="lab-error" role="alert">
               {graphError}
@@ -1011,7 +1052,10 @@ export default function Lab({ locale }: { locale: Locale }) {
             <p className="lab-note">{words.graphEmpty}</p>
           )}
           {graphKind === "step" && (
-            <p className="lab-note">{words.graphStepNote}</p>
+            <p className="lab-note">
+              {words.graphStepNote}
+              {graphTabs.length < 2 && ` ${words.graphNoPlan2}`}
+            </p>
           )}
         </section>
 
@@ -1405,6 +1449,32 @@ function RegressionTry({
       )}
     </div>
   );
+}
+
+/**
+ * Read all gradients in one plan, the way optimizer.step() reads them, and update nothing. The
+ * library has no public call for this: `gradients()` is a protected method of its optimizers.
+ * Returns false when this build of the library has no such method.
+ */
+async function readGradients(optimizer: object): Promise<boolean> {
+  const read = (optimizer as { gradients?: () => Promise<unknown> }).gradients;
+  if (typeof read !== "function") return false;
+  await read.call(optimizer);
+  return true;
+}
+
+/** FNV-1a over the bits of every parameter, as eight hex digits. Equal bits give equal sums. */
+async function parameterChecksum(
+  parameters: readonly { data(): Promise<Float32Array> }[],
+): Promise<string> {
+  let hash = 0x811c9dc5;
+  for (const parameter of parameters) {
+    const bits = new Uint32Array((await parameter.data()).slice().buffer);
+    for (const word of bits) {
+      hash = Math.imul(hash ^ word, 0x01000193) >>> 0;
+    }
+  }
+  return hash.toString(16).padStart(8, "0");
 }
 
 function rowValues(data: LoadedDataset, row: number, count: number): string[] {

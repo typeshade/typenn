@@ -2,7 +2,12 @@
 // Run with `npm run test:graph`.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { groupNodes, layoutGraph } from "../src/lab/graph-layout.ts";
+import {
+  groupNodes,
+  layoutGraph,
+  mergeSnapshots,
+  sampleIndices,
+} from "../src/lab/graph-layout.ts";
 
 const options = {
   nodeWidth: 100,
@@ -174,4 +179,37 @@ test("no plan maps no node", () => {
   const mapping = groupNodes(snapshot, undefined);
   assert.equal(mapping.byNode.size, 0);
   assert.deepEqual(mapping.groups, []);
+});
+
+test("merged snapshots list a shared tensor once and keep inputs first", () => {
+  const first = {
+    output: 4,
+    nodes: [{ id: 0 }, { id: 1 }, { id: 4 }],
+  };
+  const second = {
+    output: 5,
+    nodes: [{ id: 0 }, { id: 1 }, { id: 5 }],
+  };
+  const merged = mergeSnapshots([first, second]);
+  assert.deepEqual(
+    merged.nodes.map((n) => n.id),
+    [0, 1, 4, 5],
+  );
+  assert.equal(merged.output, 5);
+  assert.deepEqual(mergeSnapshots([]), { output: -1, nodes: [] });
+});
+
+test("sampled indices are different, in range, and the same for one seed", () => {
+  let state = 7;
+  const random = () => {
+    state = (state * 1103515245 + 12345) % 2147483648;
+    return state / 2147483648;
+  };
+  const a = sampleIndices(50, 10, random);
+  assert.equal(a.length, 10);
+  assert.equal(new Set(a).size, 10);
+  for (const i of a) assert.ok(i >= 0 && i < 50);
+  state = 7;
+  assert.deepEqual([...sampleIndices(50, 10, random)], [...a]);
+  assert.equal(sampleIndices(5, 10, random).length, 5);
 });

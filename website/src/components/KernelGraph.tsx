@@ -42,9 +42,10 @@ const text = {
     notRun: "not in this plan",
     inputs: "Inputs",
     group: "Group",
+    dispatch: "Dispatch",
+    callGroup: "Call group",
     fused: "fused",
     notFused: "not fused",
-    calls1: "calls",
     why: "Why it starts here",
     noPlan: "No plan yet. Run the graph to see it.",
     noSnapshot: "The plan has no graph view. Its groups are listed below.",
@@ -54,7 +55,7 @@ const text = {
       "The plan and the graph do not line up. The groups are shown without the mapping.",
     none: "none",
     readme: "How a read runs",
-    rows: "Drag to pan. Wheel or buttons to zoom.",
+    rows: "Drag to pan. Ctrl or ⌘ + wheel, or the buttons, to zoom.",
   },
   ko: {
     region: "커널 그래프",
@@ -72,9 +73,10 @@ const text = {
     notRun: "이 계획에 없음",
     inputs: "입력",
     group: "그룹",
+    dispatch: "디스패치",
+    callGroup: "호출 묶음",
     fused: "융합됨",
     notFused: "융합되지 않음",
-    calls1: "호출",
     why: "이 지점에서 시작하는 이유",
     noPlan: "아직 계획이 없습니다. 그래프를 실행하면 표시됩니다.",
     noSnapshot: "이 계획에는 그래프 보기가 없습니다. 그룹을 아래에 나열합니다.",
@@ -83,9 +85,27 @@ const text = {
     unaligned: "계획과 그래프가 맞지 않습니다. 그룹은 대응 없이 표시합니다.",
     none: "없음",
     readme: "read 실행 방식",
-    rows: "끌어서 이동합니다. 휠 또는 버튼으로 확대합니다.",
+    rows: "끌어서 이동합니다. Ctrl 또는 ⌘ + 휠이나 버튼으로 확대합니다.",
   },
 };
+
+type Words = (typeof text)["en"] & {
+  readonly callCount: (n: number) => string;
+};
+
+/** "2 calls" in English, "호출 2개" in Korean. */
+function callCount(n: number, locale: Locale): string {
+  if (locale === "ko") return `호출 ${n}개`;
+  return `${n} ${n === 1 ? "call" : "calls"}`;
+}
+
+/** "Dispatch" when the plan ran dispatches (WebGPU, WebGL2), "Call group" when it did not (CPU). */
+function groupWord(
+  plan: DevicePlan | undefined,
+  words: (typeof text)["en"],
+): string {
+  return plan && plan.report.dispatches > 0 ? words.dispatch : words.callGroup;
+}
 
 const LAYOUT: LayoutOptions = {
   nodeWidth: 156,
@@ -130,7 +150,11 @@ export default function KernelGraph({
   label,
   compact = false,
 }: KernelGraphProps) {
-  const words = text[locale];
+  const words: Words = {
+    ...text[locale],
+    group: groupWord(plan, text[locale]),
+    callCount: (n) => callCount(n, locale),
+  };
   const options = compact ? COMPACT : LAYOUT;
   const mapping = useMemo(
     () => groupNodes(snapshot ?? { nodes: [] }, plan),
@@ -200,6 +224,8 @@ export default function KernelGraph({
     const element = viewport.current;
     if (!element) return;
     const onWheel = (event: WheelEvent) => {
+      // A plain wheel scrolls the page. Ctrl or ⌘ + wheel (a trackpad pinch too) zooms the graph.
+      if (!event.ctrlKey && !event.metaKey) return;
       event.preventDefault();
       const rect = element.getBoundingClientRect();
       const cx = event.clientX - rect.left;
@@ -459,7 +485,7 @@ function Summary({
 }: {
   plan: DevicePlan;
   snapshotNodes: number | null;
-  words: (typeof text)["en"];
+  words: Words;
 }) {
   return (
     <div className="kg-summary">
@@ -484,13 +510,7 @@ function Summary({
   );
 }
 
-function GroupList({
-  plan,
-  words,
-}: {
-  plan: DevicePlan;
-  words: (typeof text)["en"];
-}) {
+function GroupList({ plan, words }: { plan: DevicePlan; words: Words }) {
   return (
     <ol className="kg-groups">
       {plan.report.groups.map((group, index) => (
@@ -500,8 +520,8 @@ function GroupList({
           </span>
           <span>
             {words.group} {index + 1} ·{" "}
-            {group.fused ? words.fused : words.notFused} · {group.calls.length}{" "}
-            {words.calls1}: {group.calls.join(", ")}
+            {group.fused ? words.fused : words.notFused} ·{" "}
+            {words.callCount(group.calls.length)}: {group.calls.join(", ")}
             {group.why && (
               <>
                 <br />
@@ -522,7 +542,7 @@ function Legend({
   words,
 }: {
   mapping: ReturnType<typeof groupNodes>;
-  words: (typeof text)["en"];
+  words: Words;
 }) {
   if (mapping.groups.length === 0) return null;
   return (
@@ -537,8 +557,8 @@ function Legend({
           </span>
           <span>
             {words.group} {group.index + 1} ·{" "}
-            {group.fused ? words.fused : words.notFused} · {group.calls.length}{" "}
-            {words.calls1}
+            {group.fused ? words.fused : words.notFused} ·{" "}
+            {words.callCount(group.calls.length)}
           </span>
         </li>
       ))}
@@ -559,7 +579,7 @@ function TooltipBody({
   mapping: ReturnType<typeof groupNodes>;
   kernel: string | undefined;
   plan: DevicePlan | undefined;
-  words: (typeof text)["en"];
+  words: Words;
 }) {
   const group = mapping.byNode.get(node.id);
   const inputs = node.inputs.map((id) => {
@@ -585,7 +605,7 @@ function TooltipBody({
         <span>
           {words.group} {group.group + 1} ·{" "}
           {group.fused ? words.fused : words.notFused}
-          {group.calls > 1 ? ` · ${group.calls} ${words.calls1}` : ""}
+          {group.calls > 1 ? ` · ${words.callCount(group.calls)}` : ""}
         </span>
       ) : node.kind === "input" ? null : (
         <span>{node.computed ? words.computed : words.notRun}</span>
@@ -617,7 +637,7 @@ function nodeTitle(
   node: GraphNode,
   kernel: string | undefined,
   group: number | undefined,
-  words: (typeof text)["en"],
+  words: Words,
 ): string {
   const what = node.kind === "input" ? words.input : node.op;
   const where =

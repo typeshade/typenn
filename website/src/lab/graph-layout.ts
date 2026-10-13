@@ -257,3 +257,51 @@ export function groupNodes(
   }
   return { groups, byNode, aligned };
 }
+
+/**
+ * Join the snapshots of several tensors that one plan reads, such as the gradient of each
+ * parameter. A tensor that two snapshots share keeps its first place. The input of a tensor still
+ * comes before it, because each snapshot is in topological order. `output` is the one of the last
+ * snapshot: a view that reads several tensors has no single output.
+ */
+export function mergeSnapshots<
+  S extends {
+    readonly output: number;
+    readonly nodes: readonly { readonly id: number }[];
+  },
+>(
+  snapshots: readonly S[],
+): { readonly output: number; readonly nodes: S["nodes"][number][] } {
+  const seen = new Set<number>();
+  const nodes: S["nodes"][number][] = [];
+  for (const snapshot of snapshots)
+    for (const node of snapshot.nodes) {
+      if (seen.has(node.id)) continue;
+      seen.add(node.id);
+      nodes.push(node);
+    }
+  const last = snapshots[snapshots.length - 1];
+  return { output: last ? last.output : -1, nodes };
+}
+
+/**
+ * `n` different indices of `0 ... count - 1`, chosen by a partial Fisher-Yates shuffle with the
+ * random numbers of `random` (a function that returns a number in [0, 1)). A seeded `random`
+ * gives the same indices on every run.
+ */
+export function sampleIndices(
+  count: number,
+  n: number,
+  random: () => number,
+): Uint32Array {
+  const take = Math.min(Math.max(0, Math.floor(n)), count);
+  const pool = new Uint32Array(count);
+  for (let i = 0; i < count; i++) pool[i] = i;
+  for (let i = 0; i < take; i++) {
+    const j = i + Math.floor(random() * (count - i));
+    const swap = pool[i]!;
+    pool[i] = pool[j]!;
+    pool[j] = swap;
+  }
+  return pool.slice(0, take);
+}

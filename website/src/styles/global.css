@@ -441,6 +441,7 @@
 .lab-facts dt { color: var(--muted); }
 .lab-facts dd { margin: 0; overflow-wrap: anywhere; }
 .lab-card-actions { display: flex; flex-direction: column; gap: 8px; margin-top: auto; }
+.lab-graph-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
 .lab-form { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px 16px; }
 .lab-field { display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 13px; }
 .lab-field.lab-wide { grid-column: 1 / -1; }
@@ -482,7 +483,7 @@
 .kg-buttons { display: flex; gap: 4px; }
 .kg-buttons button { min-width: 32px; min-height: 32px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--ink); font: inherit; cursor: pointer; }
 .kg-buttons button:focus-visible, .kg-node:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
-.kg-viewport { position: relative; overflow: hidden; touch-action: none; cursor: grab; border: 1px solid var(--line); border-radius: 8px; background: var(--soft); max-width: 100%; }
+.kg-viewport { position: relative; overflow: hidden; touch-action: pan-y pinch-zoom; cursor: grab; border: 1px solid var(--line); border-radius: 8px; background: var(--soft); max-width: 100%; }
 .kg-viewport:active { cursor: grabbing; }
 .kg-svg { display: block; }
 .kg-node rect { fill: var(--panel); stroke: var(--line); stroke-width: 1; }
