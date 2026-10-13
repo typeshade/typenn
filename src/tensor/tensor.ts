@@ -35,6 +35,11 @@ export class Tensor {
    * tensor, and the first plan that reads a tensor the caller made uploads it.
    */
   storage?: Resident<Float32Array>;
+  /**
+   * @internal True when `storage` holds a newer value than the host copy of an input tensor. An
+   * optimizer step sets it; `hostValues()` reads the array back once and clears it.
+   */
+  hostStale = false;
   private disposed = false;
 
   /** @internal */
@@ -286,19 +291,40 @@ export class Tensor {
     if (values.length !== this.node.value.length)
       throw new RangeError("Parameter assignment must preserve tensor size.");
     this.node.value.set(values);
+    this.hostStale = false;
     this.storage?.write(this.node.value);
   }
 
-  /** @internal Host view used by the initial optimizer implementation. */
-  parameterValues(): Float32Array {
+  /**
+   * The host value of a trainable parameter. After an optimizer step the value is on the device
+   * only, and this reads it back once. The returned array is the parameter's own host array.
+   */
+  async parameterValues(): Promise<Float32Array> {
+    this.assertUsable();
     if (!this.requiresGrad || this.node.kind !== "input")
       throw new TypeError("Expected a trainable parameter tensor.");
-    return this.node.value;
+    return this.hostValues();
+  }
+
+  /**
+   * @internal The host value of an input tensor. A stale one is read back from its array first.
+   */
+  async hostValues(): Promise<Float32Array> {
+    const node = this.node;
+    if (node.kind !== "input")
+      throw new TypeError("Only an input tensor has a host value.");
+    if (this.hostStale) {
+      node.value.set(await this.storage!.read());
+      this.hostStale = false;
+    }
+    return node.value;
   }
 
   async dispose(): Promise<void> {
     if (this.disposed) return;
     this.disposed = true;
+    // The value of a stale parameter goes back to the host before its array is freed.
+    if (this.hostStale && !this.device.isDisposed()) await this.hostValues();
     await this.device.release(this);
   }
 

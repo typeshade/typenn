@@ -157,12 +157,19 @@ async function plansOnDevice() {
     });
     out.forward = stated(device.lastReport);
     await loss.backward();
+    const grads = parameters.map((parameter) => parameter.grad);
     const before = device.reports.length;
-    // The step of an optimizer reads the gradient of every parameter.
+    // The gradients of all parameters are read in one plan, as the backward pass of the model.
     out.backwardSeen = await counted(async () => {
-      await new nn.SGD(parameters, { lr: 0.1 }).step();
+      await device.materializeAll(grads);
     });
     out.backward = device.reports.slice(before).map(stated);
+    // The step computes the same gradients inside its update plan and reads nothing back.
+    const beforeStep = device.reports.length;
+    out.stepSeen = await counted(async () => {
+      await new nn.SGD(parameters, { lr: 0.1 }).step();
+    });
+    out.step = device.reports.slice(beforeStep).map(stated);
   } finally {
     await device.dispose();
   }
@@ -194,6 +201,10 @@ test("the plans on a real device are the plans on the fake one, and the device i
   assert.deepEqual(result.backward, [MNIST_BACKWARD]);
   // One plan and the read-back of each of the four gradients.
   assert.deepEqual(result.backwardSeen, { dispatches: 10, submissions: 5 });
+  // The step is one plan with no read-back: its submission is the only one.
+  assert.equal(result.step.length, 1);
+  assert.equal(result.stepSeen.submissions, 1);
+  assert.equal(result.stepSeen.dispatches, result.step[0].dispatches);
   assert.deepEqual(logged, []);
 });
 

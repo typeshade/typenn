@@ -217,9 +217,10 @@ model.eval();
 The complete IDX dataset loader, shuffled batch loop, and evaluation example are in
 [`examples/mnist`](./examples/mnist). It keeps images as uint8 on the host, normalizes each
 batch, uses logits directly with sparse-label cross entropy, and evaluates by argmax. The Tensor
-forward and backward operations run as kernel functions on the selected tier. An optimizer reads the
-gradients of all its parameters in one plan. Adam moment calculation and parameter updates use host
-arrays, so this example demonstrates the API and is not tuned for training throughput.
+forward and backward operations run as kernel functions on the selected tier. An optimizer step
+computes the gradients and the parameter and moment updates in one plan, on the device. It reads no
+gradient back and uploads no parameter. This example demonstrates the API. Its speed on SwiftShader
+is in the Measurements section.
 
 `createTrainer()` remains limited to a single `Linear` classifier and SGD. It runs the same Tensor
 graph as the explicit loop: `matmul`, bias, softmax cross entropy, `backward()` and an `SGD` step.
@@ -285,8 +286,13 @@ unsupported, and ask for the missing rule by name when called.
   `Flatten`, `Linear`, `ReLU` and `Dropout`. The losses are `CrossEntropyLoss`, with sparse integer
   labels, and `MSELoss`, the mean of squared differences. They are `nn.loss.crossEntropy` and
   `nn.loss.mse`.
-- `Tensor.backward()` accumulates gradients on registered parameter leaves. SGD and Adam
-  optimizer objects update host parameter arrays. Adam is not yet a device kernel.
+- `Tensor.backward()` accumulates gradients on registered parameter leaves. SGD and Adam update
+  the parameters, and the Adam moments, on the device, in one plan (`src/kernels/optim.shade.ts`).
+  A step reads no gradient back and uploads no parameter. The moments start at zero on the first
+  step. A parameter keeps its Tensor object, and its host copy is read back on demand:
+  `parameterValues()`, `data()` and `dispose()` do it. A layer's `weight` and `bias` arrays are the
+  host copy of its parameters. They are current after a read of the parameter, and after the
+  `fit()` of a Trainer. They are not updated after each step of an explicit loop.
 - Tensor-graph autograd remains limited. Model serialization and WebNN are not implemented.
 - `shadeGrad`/`shadeGradCheck` operate on pure TypeShade functions only.
 
@@ -308,12 +314,13 @@ back. The plan alone is one submission (`device.lastReport.submissions`).
 | a dense layer `x.matmul(w).add(bias).relu()`      |                 3 |                1 |                  2 |                 2 |
 | MNIST forward, `loss.data()`                      |                 9 |                5 |                  2 |                 2 |
 | MNIST backward, four `grad.data()` calls          |                11 |               10 |                  8 |                 8 |
-| MNIST backward, `optimizer.step()` reads all four |                11 |               10 |                  8 |                 5 |
+| MNIST backward, `optimizer.step()` reads all four |                11 |               10 |                  8 |                 1 |
 
 The graphs are the chain of 1,024 elements, a dense layer of 784 inputs and 128 outputs on 64 rows,
 and the model of `examples/mnist` on a batch of 64. Before, an optimizer read each gradient with a
-`data()` of its own. Now it reads the gradients of all its parameters in one plan, which is the last
-row.
+`data()` of its own. In the last row the step of this branch computes the gradients inside its
+update plan, so it is one submission. The dispatches stay 10, because the update calls join the
+dispatches of the backward pass.
 
 ### Size of the build
 
@@ -352,6 +359,35 @@ is given 20 dispatches in 10 submissions per step before, and 15 dispatches in 7
 The chain is faster after, in each round. Run `node scripts/bench-step.mjs --scenario step` or
 `--scenario chain` to repeat a row. `--dist <directory>` runs the script on the `dist` of another
 build.
+
+### Optimizer on the device
+
+The baseline here is `main` at commit `31e5387`, which the optimizer updated on the host. Both builds
+run the same `scripts/bench-step.mjs` on Chromium 141 with SwiftShader, and the rounds alternate.
+
+| Measure, one `step()` or one training step | Build  | Result                                   |
+| ------------------------------------------ | ------ | ---------------------------------------- |
+| SGD, `counts`: the step on the graph       | before | 10 dispatches in 5 submissions           |
+| SGD, `counts`: the step on the graph       | after  | 10 dispatches in 1 submission            |
+| Adam, `step`: the whole step, batch 64     | before | 15 dispatches in 7 submissions (one run) |
+| Adam, `step`: the whole step, batch 64     | after  | 19 dispatches in 3 submissions (one run) |
+
+The times are medians of 20 steps after 5 warm-up steps, in milliseconds. The rounds are in the order
+they ran.
+
+| Scenario                                                      | Build  | Rounds              | Median |
+| ------------------------------------------------------------- | ------ | ------------------- | -----: |
+| `optimizer.step()` alone, the queue finished inside the clock | before | 126.3, 111.9, 107.8 |  111.9 |
+| `optimizer.step()` alone, the queue finished inside the clock | after  | 126.4, 139.3, 141.2 |  139.3 |
+| whole MNIST step, batch 64, Adam                              | before | 198.5, 234.1, 203.5 |  203.5 |
+| whole MNIST step, batch 64, Adam                              | after  | 217.8, 252.0, 215.2 |  217.8 |
+
+On SwiftShader the device-side step is not faster. A software device runs the update kernels on the
+CPU, so each kernel costs about what the host loop it replaces cost, and the removed readbacks are
+short here. A hardware GPU is not measured in this table. An earlier measurement of `step()` without
+the flush read 30 to 40 ms, because the device had not finished the work when the clock stopped. The
+flushed rows are the ones above. The per-step traffic that this change removes is measured in the
+test `a training step reads back only the loss and uploads no parameter values`, on a fake device.
 
 ## Tests
 

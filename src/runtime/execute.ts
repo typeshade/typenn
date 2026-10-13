@@ -28,19 +28,28 @@ export async function execute(
   roots: readonly Tensor[],
   memory: Memory,
 ): Promise<Float32Array[]> {
+  await compute(roots, memory);
+  return Promise.all(
+    roots.map(async (root) =>
+      // A tensor the caller made holds its values on the host; a device update may have left
+      // a newer value in its array, which one readback brings to the host first.
+      root.node.kind === "input"
+        ? (await root.hostValues()).slice()
+        : root.storage!.read(),
+    ),
+  );
+}
+
+/** Compute the tensors under `roots` that have no array, as one plan. Nothing is read back. */
+export async function compute(
+  roots: readonly Tensor[],
+  memory: Memory,
+): Promise<void> {
   const pending = postOrder(
     roots,
     (tensor) => tensor.storage !== undefined || tensor.node.kind === "input",
   );
   if (pending.length > 0) await plan(pending, memory);
-  // A tensor the caller made holds its values on the host.
-  return Promise.all(
-    roots.map((root) =>
-      root.node.kind === "input"
-        ? root.node.value.slice()
-        : root.storage!.read(),
-    ),
-  );
 }
 
 async function plan(pending: readonly Tensor[], memory: Memory): Promise<void> {

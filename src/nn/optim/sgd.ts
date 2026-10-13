@@ -1,5 +1,6 @@
 import type { Tensor } from "../../tensor/tensor.js";
 import { Optimizer } from "./optimizer.js";
+import { sgdUpdateOf } from "./update.js";
 
 export interface SGDOptions {
   readonly lr: number;
@@ -16,14 +17,16 @@ export class SGD extends Optimizer {
     this.learningRate = options.lr;
   }
 
+  /** Update every parameter on the device, in one plan. No gradient is read back. */
   async step(): Promise<void> {
-    const gradients = await this.gradients();
-    for (const [index, parameter] of this.parameters.entries()) {
-      const updated = parameter.parameterValues().slice();
-      const gradient = gradients[index]!;
-      for (let element = 0; element < updated.length; element++)
-        updated[element] -= this.learningRate * gradient[element]!;
-      await parameter.assign(updated);
-    }
+    const gradients = this.gradientTensors();
+    const updates = this.parameters.map((parameter, index) =>
+      sgdUpdateOf(parameter, gradients[index]!, this.learningRate),
+    );
+    const device = this.parameters[0]!.device;
+    await device.computeAll(updates);
+    this.parameters.forEach((parameter, index) =>
+      device.adopt(parameter, updates[index]!),
+    );
   }
 }

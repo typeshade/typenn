@@ -10,7 +10,7 @@ import type { DevicePlan } from "./device-types.js";
 import { checkedShape, sizeOf, type Shape } from "../tensor/shape.js";
 import type { OpNode } from "../tensor/node.js";
 import { Tensor } from "../tensor/tensor.js";
-import { execute, type Memory } from "./execute.js";
+import { compute, execute, type Memory } from "./execute.js";
 import type {
   BackendInfo,
   DeviceOptions,
@@ -189,6 +189,31 @@ export class Device {
     );
     this.pending.add(task);
     return task;
+  }
+
+  /** @internal Compute several tensors in one plan and keep their arrays. Nothing is read back. */
+  computeAll(tensors: readonly Tensor[]): Promise<void> {
+    this.assertUsable();
+    const task: Promise<void> = compute(tensors, this.memory).finally(() =>
+      this.pending.delete(task),
+    );
+    this.pending.add(task);
+    return task;
+  }
+
+  /**
+   * @internal Make the computed array of `source` the array of `target`, and free the array
+   * `target` held. `source` keeps none. The host value of `target` is stale until it is read.
+   */
+  adopt(target: Tensor, source: Tensor): void {
+    this.assertUsable();
+    const array = source.storage;
+    if (array === undefined)
+      throw new Error("adopt() needs a tensor that a plan computed.");
+    this.release(target);
+    target.storage = array;
+    target.hostStale = true;
+    source.storage = undefined;
   }
 
   /** @internal Free the array of a tensor. */

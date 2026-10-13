@@ -131,9 +131,13 @@ export async function mnistPlans(nn, device) {
   await loss.data();
   const forward = device.lastReport;
   await loss.backward();
+  // The gradients are read in their own plan first. `step()` computes them inside its update
+  // plan, so the backward pass alone is what this helper reports.
   const before = device.reports.length;
+  await device.materializeAll(parameters.map((parameter) => parameter.grad));
+  const backward = device.reports.slice(before);
   await new nn.SGD(parameters, { lr: 0.1 }).step();
-  return { forward, backward: device.reports.slice(before) };
+  return { forward, backward };
 }
 
 /** A report as `MNIST_FORWARD` and `MNIST_BACKWARD` state a plan. */

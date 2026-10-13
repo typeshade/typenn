@@ -9,6 +9,9 @@
 //   step    one MNIST training step of `examples/mnist` (zeroGrad, forward, loss, backward, Adam) on a
 //           batch of 64 images: the median time of `--steps` steps after `--warmup` steps.
 //   chain   `relu((a + b) * c)` over `--length` elements, read back whole: the median time.
+//   optimizer  the time of `optimizer.step()` alone (Adam on the same model): the median of `--steps`
+//           steps after `--warmup` steps. The forward and backward pass are outside the clock, and the
+//           clock stops when the queue has finished the step.
 //   counts  the dispatches and the submissions for one `data()` of the chain, of a dense layer, of the
 //           forward pass of the MNIST model, and of its backward pass (four `data()` calls, and the
 //           one `step()` of an optimizer). No time.
@@ -44,7 +47,15 @@ async function measure({
   length,
 }) {
   const nn = await import("/dist/index.js");
-  const device = await nn.device(preference);
+  // The optimizer scenario makes the GPUDevice itself, so that it can wait for the queue to finish
+  // the work of a step: a step with no read-back returns before the device has run it.
+  const gpuDevice =
+    scenario === "optimizer"
+      ? await (await navigator.gpu.requestAdapter()).requestDevice()
+      : undefined;
+  const device = await nn.device(
+    gpuDevice ? { device: preference, gpuDevice } : preference,
+  );
   // The calls the device is given while `run` runs.
   const counted = async (run) => {
     const { submit } = GPUQueue.prototype;
@@ -138,8 +149,13 @@ async function measure({
         const loss = lossOf(model);
         await loss.data();
         await loss.backward();
+        // The optimizer alone is timed in the `optimizer` scenario: the rest is outside the clock.
+        const start = performance.now();
         await optimizer.step();
+        if (gpuDevice) await gpuDevice.queue.onSubmittedWorkDone();
+        const elapsed = performance.now() - start;
         await loss.disposeGraph(parameters);
+        return scenario === "optimizer" ? elapsed : undefined;
       };
     }
     for (let i = 0; i < warmup; i++) await step();
@@ -147,8 +163,8 @@ async function measure({
     const times = [];
     for (let i = 0; i < steps; i++) {
       const start = performance.now();
-      await step();
-      times.push(performance.now() - start);
+      const elapsed = await step();
+      times.push(elapsed ?? performance.now() - start);
     }
     const sorted = [...times].sort((p, q) => p - q);
     const median =

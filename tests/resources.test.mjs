@@ -100,8 +100,8 @@ test("a training step leaves no array behind", async () => {
       `live buffers after each step: ${counts}`,
     );
     await optimizer.zeroGrad();
-    // Four parameters, and nothing else.
-    assert.equal(live(), 4);
+    // Four parameters, and the two moments of each on the device, and nothing else.
+    assert.equal(live(), 4 + 2 * 4);
   });
   // A disposed device has freed everything it made.
   const gpu = fakeGpu();

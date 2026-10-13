@@ -130,6 +130,9 @@ export class Trainer {
         history.push(metrics);
         options.onEpoch?.(metrics);
       }
+      // The optimizer updates the parameters on the device. The layers' host arrays, which the
+      // parameters share, take the trained values here, once.
+      await Promise.all([weight.parameterValues(), bias.parameterValues()]);
       return history;
     } finally {
       this.fitting = false;

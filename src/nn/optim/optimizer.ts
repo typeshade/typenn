@@ -27,13 +27,23 @@ export abstract class Optimizer {
 
   abstract step(): Promise<void>;
 
-  /** The gradient of each parameter, read in one plan. */
-  protected async gradients(): Promise<Float32Array[]> {
-    const gradients = this.parameters.map((parameter) => {
+  /**
+   * The gradient tensor of each parameter, not yet read. `step()` computes them on the device in
+   * the plan of its update. Throws when `backward()` has not run.
+   */
+  protected gradientTensors(): Tensor[] {
+    return this.parameters.map((parameter) => {
       if (!parameter.grad)
         throw new Error("Call backward() before optimizer.step().");
       return parameter.grad;
     });
-    return this.parameters[0]!.device.materializeAll(gradients);
+  }
+
+  /**
+   * The gradient of each parameter, read back in one plan. Not used by `step()`, which updates
+   * the parameters on the device; kept for the kernel-graph view of the lab.
+   */
+  protected async gradients(): Promise<Float32Array[]> {
+    return this.parameters[0]!.device.materializeAll(this.gradientTensors());
   }
 }
