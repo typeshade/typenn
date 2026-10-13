@@ -8,7 +8,9 @@
     "build": "astro build",
     "prebuild": "npm run sync:typenn",
     "preview": "astro preview",
-    "sync:typenn": "node scripts/sync-typenn-runtime.mjs"
+    "sync:typenn": "node scripts/sync-typenn-runtime.mjs",
+    "datasets": "python3 scripts/fetch_datasets.py",
+    "test:datasets": "node --experimental-strip-types scripts/test-datasets.mjs"
   },
   "dependencies": {
     "@astrojs/react": "^7.0.1",

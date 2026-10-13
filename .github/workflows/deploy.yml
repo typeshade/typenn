@@ -34,6 +34,20 @@ jobs:
             website/package-lock.json
       - name: Build the TypeNN runtime
         run: npm ci && npm run build
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install the dataset script's numpy
+        run: pip install "numpy==2.*"
+      - name: Cache the dataset downloads
+        uses: actions/cache@v4
+        with:
+          path: website/.dataset-cache
+          key: datasets-${{ hashFiles('website/scripts/fetch_datasets.py') }}
+          # The script checks every file's SHA-256, so an older cache is safe to restore.
+          restore-keys: datasets-
+      - name: Mirror the datasets under website/public/data
+        run: cd website && npm run datasets
       - name: Build the site
         run: cd website && npm ci && npm run build
       - name: Deploy website/dist

@@ -38,5 +38,6 @@ try {
   // An exported TypeNN checkout can still be bundled; its provenance must be set explicitly.
   commit = process.env.TYPE_NN_SOURCE_COMMIT ?? "unknown";
 }
+await writeFile(resolve(destination, "version.json"), `${JSON.stringify({ commit, source: "https://github.com/typeshade/typenn" }, null, 2)}\n`);
 await writeFile(resolve(destination, "README.md"), `# Vendored TypeNN browser runtime\n\nGenerated from [typeshade/typenn](https://github.com/typeshade/typenn) at commit \`${commit}\`.\n\nRebuild TypeNN, then run \`npm run sync:typenn\` from the website directory. The original Apache-2.0 license is included as \`LICENSE\`. The declaration file \`index.d.ts\` is maintained by the website for its narrow Playground import surface.\n`);
 console.log(`Synced ${generated.length} TypeNN runtime JavaScript files from ${commit}.`);
