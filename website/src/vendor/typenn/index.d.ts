@@ -28,6 +28,10 @@ export interface Tensor {
   reshape(shape: readonly number[]): Tensor;
   data(): Promise<Float32Array>;
   backward(upstream?: Tensor): Promise<void>;
+  /** Set the host value of a trainable parameter, and the device copy with it. */
+  assign(values: ArrayLike<number>): Promise<void>;
+  /** The host value of a trainable parameter, read back from the device when it is stale. */
+  parameterValues(): Promise<Float32Array>;
   disposeGraph(preserve?: readonly Tensor[]): Promise<void>;
 }
 
