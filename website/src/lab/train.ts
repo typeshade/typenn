@@ -28,7 +28,11 @@ export interface RunConfig {
   readonly maxSteps?: number;
   /** Smoke runs: evaluate on this many batches of 256 test samples, from the first. */
   readonly maxEvalBatches?: number;
+  /** "quick" marks the short run of the Try section. Absent means "full". */
+  readonly kind?: RunKind;
 }
+
+export type RunKind = "quick" | "full";
 
 export interface Metrics {
   /** Share of correct predictions, from 0 to 1 (classification). */
@@ -62,6 +66,10 @@ export interface RunResult {
   readonly test: Metrics;
   /** False when the run was stopped before its last epoch. */
   readonly completed: boolean;
+  /** "quick" for the short run of the Try section, else "full". */
+  readonly kind: RunKind;
+  /** True when the run ended at config.maxSteps. A user stop leaves it false. */
+  readonly capped: boolean;
   readonly userAgent: string;
   readonly typennCommit: string;
   readonly finishedAt: string;
@@ -375,6 +383,8 @@ export async function train(
     seconds: (performance.now() - started) / 1000,
     test,
     completed,
+    kind: config.kind ?? "full",
+    capped,
     userAgent:
       typeof navigator === "undefined" ? "unknown" : navigator.userAgent,
     typennCommit: version.commit,

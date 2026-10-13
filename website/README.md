@@ -121,7 +121,7 @@ interface LabApi {
 ```
 
 A `RunResult` holds `config`, `tier`, `epochs` (`trainLoss` and `test` for each epoch), `steps`,
-`samplesSeen`, `seconds`, `test`, `completed`, `userAgent`, `typennCommit` and `finishedAt`.
+`samplesSeen`, `seconds`, `test`, `completed`, `kind` (`"quick"` for the Try section's short run, else `"full"`), `capped` (the run ended at `maxSteps`), `userAgent`, `typennCommit` and `finishedAt`.
 `typennCommit` comes from `src/vendor/typenn/version.json`, which `npm run sync:typenn` writes.
 
 ## Project documents

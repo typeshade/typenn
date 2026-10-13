@@ -138,9 +138,24 @@ const text: { en: Record<string, any>; ko: Record<string, any> } = {
     },
     completed: "Completed",
     stopped: "Stopped",
+    quickStatus: "Quick ({steps} steps)",
     tryTitle: "5. Try the model",
-    noModel: "Run a model first. Then you can try it here.",
-    trainedOn: "Trained on",
+    noModel: "No model trained on {dataset} yet.",
+    quickTrain: "Train a quick model",
+    quickNote:
+      "A quick run stops after 200 steps and tests on the first 1,024 test samples. For a full run, use section 3, Run.",
+    busyTry: "A run is in progress. Try is available when it ends.",
+    loadModel: "Load the trained model",
+    loadingModel: "Loading the trained model…",
+    modelUsed: "Model in use",
+    testMetric: "Test",
+    trainedAgo: "trained {time}",
+    presetName: {
+      mlp: "MLP",
+      cnn: "CNN",
+      bag: "Bag-of-words MLP",
+      regression: "Regression MLP",
+    },
     clear: "Clear",
     randomTest: "Random test image",
     randomRow: "Random test row",
@@ -252,9 +267,24 @@ const text: { en: Record<string, any>; ko: Record<string, any> } = {
     },
     completed: "완료",
     stopped: "중지됨",
+    quickStatus: "빠른 학습 ({steps}단계)",
     tryTitle: "5. 모델 실행해 보기",
-    noModel: "먼저 모델을 실행하세요. 그러면 여기서 모델을 시험할 수 있습니다.",
-    trainedOn: "학습한 데이터",
+    noModel: "{dataset} 학습 모델이 아직 없습니다.",
+    quickTrain: "간단한 모델 학습하기",
+    quickNote:
+      "간단한 실행은 200 스텝 뒤 멈추고, 테스트 샘플 처음 1,024개로 평가합니다. 전체 학습은 3. 실행 구역에서 하세요.",
+    busyTry: "실행 중입니다. 실행이 끝나면 모델을 시험할 수 있습니다.",
+    loadModel: "학습한 모델 불러오기",
+    loadingModel: "학습한 모델을 불러오는 중…",
+    modelUsed: "사용 중인 모델",
+    testMetric: "테스트",
+    trainedAgo: "{time} 학습",
+    presetName: {
+      mlp: "MLP",
+      cnn: "CNN",
+      bag: "단어 가방 MLP",
+      regression: "회귀 MLP",
+    },
     clear: "지우기",
     randomTest: "테스트 이미지 무작위 선택",
     randomRow: "테스트 행 무작위 선택",
@@ -370,10 +400,23 @@ export function defaultConfig(dataset: string): RunConfig {
 }
 
 interface Session {
+  /** Names the run that trained the model. The Try section is keyed by it. */
+  readonly runId: string;
   readonly model: Module;
   readonly device: Device;
   readonly data: LoadedDataset;
   readonly spec: ModelSpec;
+  readonly scale: { mean: number; std: number } | undefined;
+  readonly result: RunResult;
+}
+
+/** The host copy of a trained model, kept per dataset in this page. */
+interface SavedModel {
+  readonly runId: string;
+  readonly config: RunConfig;
+  readonly spec: ModelSpec;
+  /** The trainable parameters in the order of model.parameters(). */
+  readonly params: readonly Float32Array[];
   readonly scale: { mean: number; std: number } | undefined;
   readonly result: RunResult;
 }
@@ -449,6 +492,12 @@ export default function Lab({ locale }: { locale: Locale }) {
   const [notice, setNotice] = useState<string | null>(null);
   const [stopping, setStopping] = useState(false);
   const [activeTier, setActiveTier] = useState<string | null>(null);
+  // The last trained model of each dataset id. It lives in this page only.
+  const [models, setModels] = useState<Record<string, SavedModel>>({});
+  const [activating, setActivating] = useState<string | null>(null);
+  const runSeq = useRef(0);
+  // Counts the activations and the selections: a load that is no longer the latest one stops.
+  const activation = useRef(0);
 
   const memory = useRef(new Map<string, LoadedDataset>());
   const runningRef = useRef(false);
@@ -593,7 +642,15 @@ export default function Lab({ locale }: { locale: Locale }) {
     setMetrics([]);
     setProgress(null);
     setActiveTier(null);
-    setForm(config);
+    setForm({
+      ...config,
+      maxSteps: undefined,
+      maxEvalBatches: undefined,
+      kind: undefined,
+    });
+    // A run replaces the live session: a load still in flight stops.
+    activation.current++;
+    setActivating(null);
     setSelected(config.dataset);
     let device: Device | undefined;
     try {
@@ -633,7 +690,18 @@ export default function Lab({ locale }: { locale: Locale }) {
       resultsRef.current = [...resultsRef.current, result];
       setResults(resultsRef.current);
       if (model) {
+        const runId = `run-${++runSeq.current}`;
+        const saved: SavedModel = {
+          runId,
+          config,
+          spec,
+          params: await hostParameters(model),
+          scale,
+          result,
+        };
+        setModels((previous) => ({ ...previous, [config.dataset]: saved }));
         const next: Session = {
+          runId,
           model,
           device: trainDevice,
           data,
@@ -661,6 +729,68 @@ export default function Lab({ locale }: { locale: Locale }) {
   }
   runRef.current = runTraining;
 
+  /** Rebuild a saved model on the one live device, on the tier the form shows, load its parameters and make it the session. */
+  async function activateModel(id: string) {
+    const saved = models[id];
+    if (!saved || runningRef.current) return;
+    const token = ++activation.current;
+    const stale = () => token !== activation.current || runningRef.current;
+    setActivating(id);
+    let device: Device | undefined;
+    try {
+      const data = await ensureData(id);
+      const nn = await NN_PROMISE();
+      if (stale()) return;
+      const previous = sessionRef.current;
+      sessionRef.current = null;
+      setSession(null);
+      if (previous) await previous.device.dispose();
+      releaseDatasets(id);
+      device = await nn.device({ device: form.tier });
+      if (stale()) return;
+      const model = buildModel(saved.spec, nn).to(device);
+      const parameters = model.parameters();
+      if (parameters.length !== saved.params.length)
+        throw new Error(
+          `The saved model has ${saved.params.length} parameters, the build has ${parameters.length}.`,
+        );
+      for (let i = 0; i < parameters.length; i++)
+        await parameters[i]!.assign(saved.params[i]!);
+      // Another selection or a run came in while the weights loaded: this model is not wanted.
+      if (stale()) return;
+      model.eval();
+      const next: Session = {
+        runId: saved.runId,
+        model,
+        device,
+        data,
+        spec: saved.spec,
+        scale: saved.scale,
+        result: saved.result,
+      };
+      sessionRef.current = next;
+      setSession(next);
+      device = undefined;
+    } catch (cause) {
+      if (!stale())
+        setNotice(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      if (device) await device.dispose().catch(() => undefined);
+      if (token === activation.current) setActivating(null);
+    }
+  }
+
+  /** The quick model of the selected dataset: its preset, a short budget and the chosen tier. */
+  function trainQuick() {
+    void runTraining({
+      ...defaultConfig(selected),
+      tier: form.tier,
+      maxSteps: 200,
+      maxEvalBatches: 4,
+      kind: "quick",
+    }).catch(() => undefined);
+  }
+
   /**
    * Draw the graph of one read, on a seeded random batch of the test split. The forward reads the
    * logits. The step view splits the work of one training step in two reads: it reads the loss
@@ -670,7 +800,7 @@ export default function Lab({ locale }: { locale: Locale }) {
    * model is built and disposed afterwards.
    */
   async function captureGraph(kind: GraphKind) {
-    if (runningRef.current || graphBusy) return;
+    if (runningRef.current || graphBusy || activating !== null) return;
     setGraphBusy(kind);
     setGraphError(null);
     let fresh: Device | undefined;
@@ -795,10 +925,14 @@ export default function Lab({ locale }: { locale: Locale }) {
   }
 
   function selectDataset(id: string) {
-    if (running) return;
+    if (running || graphBusy) return;
     releaseDatasets(id);
     setSelected(id);
-    setForm(defaultConfig(id));
+    setForm({ ...defaultConfig(id), tier: form.tier });
+    activation.current++;
+    setActivating(null);
+    if (sessionRef.current?.data.info.id !== id && models[id])
+      void activateModel(id);
   }
 
   const info = datasets.find((d) => d.id === selected);
@@ -845,7 +979,7 @@ export default function Lab({ locale }: { locale: Locale }) {
                     className="lab-card-select"
                     aria-pressed={selected === d.id}
                     onClick={() => selectDataset(d.id)}
-                    disabled={running}
+                    disabled={running || graphBusy !== null}
                   >
                     <span className="lab-card-title">{d.title}</span>
                     <span className="lab-card-task">{d.task}</span>
@@ -1093,14 +1227,14 @@ export default function Lab({ locale }: { locale: Locale }) {
           <div className="lab-graph-actions">
             <Button
               onClick={() => void captureGraph("forward")}
-              disabled={running || graphBusy !== null}
+              disabled={running || graphBusy !== null || activating !== null}
               loading={graphBusy === "forward"}
             >
               {words.graphForward}
             </Button>
             <Button
               onClick={() => void captureGraph("step")}
-              disabled={running || graphBusy !== null}
+              disabled={running || graphBusy !== null || activating !== null}
               loading={graphBusy === "step"}
             >
               {words.graphStep}
@@ -1158,6 +1292,7 @@ export default function Lab({ locale }: { locale: Locale }) {
             <Table
               size="small"
               pagination={false}
+              scroll={{ x: "max-content" }}
               rowKey={(row) => `${row.finishedAt}-${row.config.dataset}`}
               dataSource={results}
               columns={[
@@ -1187,7 +1322,11 @@ export default function Lab({ locale }: { locale: Locale }) {
                 {
                   title: words.col.status,
                   render: (_, r) =>
-                    r.completed ? words.completed : words.stopped,
+                    r.completed
+                      ? words.completed
+                      : r.kind === "quick" && r.capped
+                        ? words.quickStatus.replace("{steps}", String(r.steps))
+                        : words.stopped,
                 },
               ]}
             />
@@ -1206,15 +1345,49 @@ export default function Lab({ locale }: { locale: Locale }) {
 
         <section className="lab-section" aria-labelledby="lab-try">
           <h2 id="lab-try">{words.tryTitle}</h2>
-          {!session ? (
-            <p className="lab-note">{words.noModel}</p>
-          ) : (
+          {running ? (
+            <p className="lab-note" role="status">
+              {words.busyTry}
+            </p>
+          ) : session && session.data.info.id === selected ? (
             <TryModel
+              key={`${selected}:${session.runId}`}
               session={session}
               words={words}
               locale={locale}
-              manifest={manifests[session.data.info.id]!}
+              manifest={manifests[selected]!}
             />
+          ) : models[selected] ? (
+            activating === selected ? (
+              <p className="lab-note" role="status">
+                {words.loadingModel}
+              </p>
+            ) : (
+              <div className="lab-run-bar">
+                <Button
+                  type="primary"
+                  onClick={() => void activateModel(selected)}
+                >
+                  {words.loadModel}
+                </Button>
+              </div>
+            )
+          ) : (
+            <div className="lab-try-empty">
+              <p className="lab-note">
+                {words.noModel.replace("{dataset}", info?.title ?? selected)}
+              </p>
+              <div className="lab-run-bar">
+                <Button
+                  type="primary"
+                  onClick={trainQuick}
+                  disabled={!info || !manifest}
+                >
+                  {words.quickTrain}
+                </Button>
+              </div>
+              <p className="lab-note">{words.quickNote}</p>
+            </div>
           )}
         </section>
       </div>
@@ -1233,12 +1406,18 @@ function TryModel({
   locale: Locale;
   manifest: Manifest;
 }) {
-  const { data } = session;
+  const { data, spec, result } = session;
   const task = manifest.task;
   return (
     <div className="lab-try">
-      <p className="lab-note">
-        {words.trainedOn}: {data.info.title}
+      <p className="lab-note" data-testid="try-model">
+        <strong>{words.modelUsed}:</strong> {data.info.title} ·{" "}
+        {words.presetName[spec.preset]} · {words.testMetric}:{" "}
+        {formatTest(result.test, spec.preset === "regression", locale)} ·{" "}
+        {words.trainedAgo.replace(
+          "{time}",
+          relativeTime(result.finishedAt, locale),
+        )}
       </p>
       {task === "image-classification" && (
         <ImageTry session={session} words={words} />
@@ -1543,6 +1722,31 @@ function RegressionTry({
       )}
     </div>
   );
+}
+
+/** The host copies of the trainable parameters, in the order of model.parameters(). */
+async function hostParameters(model: Module): Promise<Float32Array[]> {
+  return Promise.all(
+    model
+      .parameters()
+      .map(async (p) => Float32Array.from(await p.parameterValues())),
+  );
+}
+
+/** A short relative time, such as "3 minutes ago", in the page language. */
+function relativeTime(iso: string, locale: Locale): string {
+  const seconds = Math.round((Date.parse(iso) - Date.now()) / 1000);
+  const format = new Intl.RelativeTimeFormat(locale === "ko" ? "ko" : "en", {
+    numeric: "auto",
+  });
+  for (const [unit, size] of [
+    ["day", 86400],
+    ["hour", 3600],
+    ["minute", 60],
+  ] as const)
+    if (Math.abs(seconds) >= size)
+      return format.format(Math.round(seconds / size), unit);
+  return format.format(0, "second");
 }
 
 /**
