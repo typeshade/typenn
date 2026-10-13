@@ -11,7 +11,8 @@ export type DeviceDataset = import("../vendor/typenn/index.js").DeviceDataset;
 export type Residency = import("../vendor/typenn/index.js").Residency;
 type DatasetInputs = import("../vendor/typenn/index.js").DatasetInputs;
 type DatasetSplit = import("../vendor/typenn/index.js").DatasetSplit;
-type DeviceDatasetOptions = import("../vendor/typenn/index.js").DeviceDatasetOptions;
+type DeviceDatasetOptions =
+  import("../vendor/typenn/index.js").DeviceDatasetOptions;
 type Module = import("../vendor/typenn/index.js").Module;
 
 export type Preset = "mlp" | "cnn" | "bag" | "regression";
@@ -392,7 +393,6 @@ export async function train(
       }
       const evaluated = await evaluate(
         model,
-        device,
         data,
         dataset,
         spec,
@@ -474,7 +474,6 @@ export function fillInputs(
 /** Evaluate on the full test split, in batches of the device dataset, with the model in eval mode and no backward. */
 export async function evaluate(
   model: Module,
-  device: Device,
   data: LoadedDataset,
   dataset: DeviceDataset,
   spec: ModelSpec,
@@ -482,7 +481,6 @@ export async function evaluate(
   batchSize = 256,
   maxBatches?: number,
 ): Promise<{ metrics: Metrics; samples: number }> {
-  void device;
   model.eval();
   const parameters = model.parameters();
   const split = data.test;
