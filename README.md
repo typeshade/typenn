@@ -280,7 +280,8 @@ unsupported, and ask for the missing rule by name when called.
   to release an operation graph while preserving parameters.
 - `Module.to()`, `parameters()`, `train()`, and `eval()` support user-defined models and
   registered child layers. `Flatten`, `Linear`/`Dense`, `Conv2d`, `MaxPool2d`, `AvgPool2d`, `ReLU`, `Tanh`, `Sigmoid` and
-  `Dropout` are the layers. The example uses
+  `Dropout` are the layers. `MaxPool2d` and `AvgPool2d` default `strides` to `filterSize`
+  (the `maxPool` and `avgPool` operations default it to 1). The example uses
   `Flatten`, `Linear`, `ReLU` and `Dropout`. The losses are `CrossEntropyLoss`, with sparse integer
   labels, and `MSELoss`, the mean of squared differences. They are `nn.loss.crossEntropy` and
   `nn.loss.mse`.

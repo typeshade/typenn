@@ -404,3 +404,30 @@ test("a Conv2d, ReLU, MaxPool2d, Flatten and Linear CNN learns bar orientation i
     assert.ok(held >= 0.95, `held-out accuracy after 150 steps is ${held}`);
   });
 });
+
+test("MaxPool2d and AvgPool2d default strides to filterSize", async () => {
+  await onCpu(async (device) => {
+    const input = device.tensor(
+      new Float32Array(16).map((_, i) => i),
+      {
+        shape: [1, 4, 4, 1],
+      },
+    );
+    assert.deepEqual(
+      new nn.MaxPool2d({ filterSize: 2 }).forward(input).shape,
+      [1, 2, 2, 1],
+    );
+    assert.deepEqual(
+      new nn.AvgPool2d({ filterSize: 2 }).forward(input).shape,
+      [1, 2, 2, 1],
+    );
+    assert.deepEqual(
+      new nn.MaxPool2d({ filterSize: 2, strides: 1 }).forward(input).shape,
+      [1, 3, 3, 1],
+    );
+    const values = await new nn.MaxPool2d({ filterSize: 2 })
+      .forward(input)
+      .data();
+    assert.deepEqual([...values], [5, 7, 13, 15]);
+  });
+});

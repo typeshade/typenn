@@ -2,7 +2,7 @@ import { Tensor } from "../../tensor/tensor.js";
 import type { Device } from "../../runtime/device.js";
 import type { Conv2DOptions } from "../../tensor/spatial.js";
 import { Module } from "../module.js";
-import { random } from "./linear.js";
+import { random } from "../random.js";
 
 export interface Conv2dOptions {
   readonly kernelSize: number | readonly [number, number];
