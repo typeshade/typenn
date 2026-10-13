@@ -11,6 +11,10 @@ import { checkedShape, sizeOf, type Shape } from "../tensor/shape.js";
 import type { OpNode } from "../tensor/node.js";
 import { Tensor } from "../tensor/tensor.js";
 import { compute, execute, type Memory } from "./execute.js";
+import {
+  DeviceDataset,
+  type DeviceDatasetOptions,
+} from "../data/device-dataset.js";
 import type {
   BackendInfo,
   DeviceOptions,
@@ -313,6 +317,32 @@ export class Device {
     this.runtime?.destroy();
     resetConfiguration();
     if (activeDevice === this) activeDevice = undefined;
+  }
+
+  /** @internal Create a dataset of device-resident sources; see `DeviceDataset`. */
+  dataset(options: DeviceDatasetOptions): DeviceDataset {
+    this.assertUsable();
+    return new DeviceDataset(this, options);
+  }
+
+  /**
+   * @internal The largest storage binding of the WebGPU device, from its limits, or undefined when
+   * the device is not WebGPU or does not report it.
+   */
+  storageBindingLimit(): number | undefined {
+    const gpu = this.runtime?.device as
+      | {
+          readonly limits?: {
+            readonly maxStorageBufferBindingSize?: number;
+            readonly maxBufferSize?: number;
+          };
+        }
+      | undefined;
+    const binding = gpu?.limits?.maxStorageBufferBindingSize;
+    if (typeof binding !== "number") return undefined;
+    // A shard is one buffer, so it also fits maxBufferSize.
+    const buffer = gpu?.limits?.maxBufferSize;
+    return typeof buffer === "number" ? Math.min(binding, buffer) : binding;
   }
 
   /** @internal */

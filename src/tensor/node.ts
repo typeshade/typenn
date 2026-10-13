@@ -35,6 +35,11 @@ export interface OpNode {
   readonly op: string;
   readonly kernel: Kernel;
   readonly inputs: readonly Tensor[];
+  /**
+   * Resident arrays the call takes after its inputs: a device dataset's source and permutation,
+   * which are not Tensors. They are read, never freed, by the graph.
+   */
+  readonly arrays?: readonly object[];
   readonly values: readonly KernelValue[];
   /** Absent where the operation has no gradient rule. */
   readonly backward?: Backward;

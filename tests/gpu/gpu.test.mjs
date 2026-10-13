@@ -342,3 +342,140 @@ test("a training step on WebGPU, with the pool and with alsoRead, gives the loss
     }
   }
 });
+
+test("a sharded image dataset on WebGPU gives the batches of the CPU tier", async () => {
+  const { result, logged } = await inPage(async () => {
+    // A sharded dataset, built on `preference`: the batch values, the residency and the report.
+    const datasetBatches = async (preference) => {
+      const nn = await import("/dist/index.js");
+      const device = await nn.device(preference);
+      const N = 23;
+      const F = 12;
+      const x = Uint8Array.from(
+        { length: N * F },
+        (_, i) => (i * 37 + 11) % 256,
+      );
+      const y = Uint8Array.from({ length: N }, (_, i) => (i * 5) % 10);
+      // 16 bytes is 4 words: 4 samples per shard of 12 pixels, so the shards are 6 samples each.
+      const data = device.dataset({
+        inputs: { kind: "images", features: F },
+        train: { count: N, x, y },
+        test: { count: N, x, y },
+        shardBytes: 16,
+      });
+      try {
+        data.order(
+          Array.from({ length: N }, (_, i) => (N - 1 - i * 7 + 70 * N) % N),
+        );
+        const batches = [];
+        for (const batch of data.batches(8)) {
+          batches.push({
+            input: Array.from(await batch.input.data()),
+            labels: Array.from(await batch.labels.data()),
+          });
+        }
+        return {
+          backend: device.backend,
+          residency: data.residency,
+          batches,
+          lastReport: device.lastReport,
+        };
+      } finally {
+        data.dispose();
+        await device.dispose();
+      }
+    };
+    const cpu = await datasetBatches("cpu");
+    const gpu = await datasetBatches("webgpu");
+    return { cpu, gpu };
+  });
+  const { cpu, gpu } = result;
+  assert.deepEqual(gpu.backend, { provider: "typeshade", name: "webgpu" });
+  assert.equal(gpu.residency.tier, "device");
+  assert.ok(gpu.residency.shards.train > 1, "the dataset is sharded");
+  assert.equal(gpu.batches.length, cpu.batches.length);
+  assert.equal(gpu.batches.at(-1).labels.length, 23 % 8);
+  // Images are x / 255 and labels are class ids: both are exact on the GPU tier as on the CPU one.
+  gpu.batches.forEach((batch, b) => {
+    assert.deepEqual(
+      batch.labels,
+      cpu.batches[b].labels,
+      `labels of batch ${b}`,
+    );
+    const worst = Math.max(
+      ...batch.input.map((value, i) =>
+        Math.abs(value - cpu.batches[b].input[i]),
+      ),
+    );
+    assert.ok(worst <= 1e-6, `inputs of batch ${b} differ by ${worst}`);
+  });
+  assert.equal(gpu.lastReport.tier, "webgpu");
+  assert.deepEqual(logged, []);
+});
+
+/** Runs in the page: a dataset batch into a class-id loss and its gradient, on the CPU tier and on `tier`. */
+async function datasetLossBoth(tier) {
+  const nn = await import("/dist/index.js");
+  const datasetLoss = async (preference) => {
+    const device = await nn.device(preference);
+    const N = 10;
+    const F = 6;
+    const x = Uint8Array.from({ length: N * F }, (_, i) => (i * 29 + 3) % 256);
+    const y = Uint8Array.from({ length: N }, (_, i) => (i * 3) % 4);
+    const data = device.dataset({
+      inputs: { kind: "images", features: F },
+      train: { count: N, x, y },
+      test: { count: N, x, y },
+    });
+    try {
+      data.order([9, 3, 5, 1, 7, 0, 2, 8, 6, 4]);
+      const batch = data.batch(1, 6);
+      const logits = device.tensor(
+        Float32Array.from({ length: 6 * 4 }, (_, i) => ((i * 7) % 11) / 5 - 1),
+        { shape: [6, 4] },
+      );
+      const loss = new nn.CrossEntropyLoss({ reduction: "mean" }).forward(
+        logits,
+        batch.labels,
+      );
+      const [gradient] = nn.gradients(loss, [logits]);
+      return {
+        backend: device.backend.name,
+        residency: data.residency,
+        input: Array.from(await batch.input.data()),
+        labels: Array.from(await batch.labels.data()),
+        loss: Array.from(await loss.data()),
+        gradient: Array.from(await gradient.data()),
+      };
+    } finally {
+      data.dispose();
+      await device.dispose();
+    }
+  };
+  return { cpu: await datasetLoss("cpu"), gpu: await datasetLoss(tier) };
+}
+
+for (const [tier, residency] of [
+  ["webgpu", "device"],
+  ["webgl2", "host"],
+]) {
+  test(`a dataset batch and the class-id loss on ${tier} equal the CPU tier's (residency ${residency})`, async () => {
+    const { result, logged } = await inPage(datasetLossBoth, tier);
+    const { cpu, gpu } = result;
+    assert.equal(gpu.backend, tier);
+    assert.equal(gpu.residency.tier, residency);
+    if (residency === "host") assert.match(gpu.residency.reason, /WebGL2/);
+    assert.deepEqual(gpu.labels, cpu.labels);
+    assert.deepEqual(gpu.input, cpu.input);
+    for (const field of ["loss", "gradient"]) {
+      const worst = Math.max(
+        ...gpu[field].map((value, i) => Math.abs(value - cpu[field][i])),
+      );
+      assert.ok(worst <= 1e-5, `${field} differs by ${worst}`);
+    }
+    assert.deepEqual(
+      logged.filter((line) => !line.includes("GL Driver Message")),
+      [],
+    );
+  });
+}

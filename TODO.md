@@ -314,3 +314,32 @@ the source for bounds and index calculations is open.
 
 - [ ] Review the 85 kernel functions for bounds, index calculations and naming, as the earlier review did for its files.
 - [ ] Run the numerics cases and benchmark representative shapes on a hardware GPU.
+
+## Device-resident datasets
+
+Status: implemented on `claude/typenn-device-dataset`, with open items below. A step uploads no
+sample bytes: on the fake WebGPU device a step uploads 240 bytes at N=12 and at N=1200. The README section
+"Device-resident datasets" documents the API.
+
+Done:
+
+- `device.dataset(options)` for images (u8), tabular (f32), text bag-of-words and labels (u8, u16,
+  u32 class ids; f32 regression targets with `target`). Sources keep their dtype, packed in u32.
+- Gather kernels in `src/kernels/dataset.shade.ts`: one call per shard, rows of other shards kept.
+- Shards of `shardBytes` (default `DEFAULT_SHARD_BYTES` = 134217728).
+- `CrossEntropyLoss` accepts a device class-id Tensor (`sparseSoftmaxCrossEntropyWithLogits`).
+- `residency` (device or host, with a reason), `bytes`, `dispose()`.
+- Parity tests on the CPU tier for every kind, shard boundaries, the last short batch, eval
+  order, loss and gradients, dispose and host residency: `tests/dataset.test.mjs`.
+
+Open:
+
+- [ ] The device storage limit is read from the GPUDevice's limits when present, else 128 MiB.
+      Not measured on a real GPU. When TypeShade reports the runtime limits (proposal 0051), the
+      read moves to that API at the TODO in `device-dataset.ts`.
+- [ ] WebGL2: the dataset falls back to host batching. No WebGL2 measurement.
+- [ ] Bag-of-words gathers scan each sample's tokens for each output element: cost is vocab times
+      tokens per row. Not measured on a real vocabulary.
+- [ ] Not measured on a real GPU: `npm run test:gpu` has no dataset case yet.
+- [ ] Text sources are not sharded: a text source above one shard falls back to host batching.
+- [ ] Labels above 2^24 are refused, since f32 holds them exactly only below that.
