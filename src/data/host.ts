@@ -15,10 +15,16 @@ export function hostFeatures(
   std: ArrayLike<number>,
 ): Float32Array {
   const out = new Float32Array(indices.length * features);
+  // The device computes in f32: round mean and std, and the difference, as f32 does. A double
+  // sum or quotient of two f32 values rounds to the f32 result of the operation.
+  const center = Float32Array.from(mean);
+  const spread = Float32Array.from(std);
   for (let k = 0; k < indices.length; k++) {
     const src = indices[k]! * features;
     for (let f = 0; f < features; f++)
-      out[k * features + f] = (x[src + f]! - mean[f]!) / std[f]!;
+      out[k * features + f] = Math.fround(
+        Math.fround(x[src + f]! - center[f]!) / spread[f]!,
+      );
   }
   return out;
 }
@@ -50,7 +56,13 @@ export function hostLabels(
   const out = new Float32Array(indices.length);
   for (let k = 0; k < indices.length; k++) {
     const value = y[indices[k]!]!;
-    out[k] = target === undefined ? value : (value - target.mean) / target.std;
+    out[k] =
+      target === undefined
+        ? value
+        : Math.fround(
+            Math.fround(value - Math.fround(target.mean)) /
+              Math.fround(target.std || 1),
+          );
   }
   return out;
 }

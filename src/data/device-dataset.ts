@@ -124,7 +124,7 @@ interface DeviceSplitState {
       };
   readonly labels: Field;
   /** The row order of the split: the permutation the batches are taken from. */
-  readonly perm: Resident<Uint32Array>;
+  perm: Resident<Uint32Array>;
 }
 
 /** The split as the dataset holds it: the host copy, the order, and the device state if any. */
@@ -239,6 +239,10 @@ function validate(options: DeviceDatasetOptions): void {
     )
       throw new TypeError(
         "Text inputs are token ids (a Uint16Array or Uint32Array).",
+      );
+    if (split.y instanceof Float32Array !== train.y instanceof Float32Array)
+      throw new TypeError(
+        "The train and test labels must be both class ids or both f32 regression targets.",
       );
     if (!(split.y instanceof Float32Array)) {
       for (const label of split.y) {
@@ -408,7 +412,14 @@ export class DeviceDataset {
       order[k] = index;
     }
     this.splits.train.order.set(order);
-    this.splits.train.device?.perm.write(order);
+    const device = this.splits.train.device;
+    if (device !== undefined) {
+      // A new Resident for each order. A batch made before this call still names the old one, so
+      // computing it now throws, and never reads the new order under the rows of the old.
+      const stale = device.perm;
+      device.perm = this.keep(order);
+      this.release(stale);
+    }
   }
 
   /**
@@ -614,7 +625,10 @@ export class DeviceDataset {
     if (inputs.kind === "text") {
       const width = split.x instanceof Uint16Array ? 16 : 32;
       const perWord = elementsPerWord(width);
-      const tokens = new Uint32Array(Math.ceil(split.x.length / perWord));
+      // At least one word: WebGPU cannot bind an empty array (every document is empty).
+      const tokens = new Uint32Array(
+        Math.max(1, Math.ceil(split.x.length / perWord)),
+      );
       for (let t = 0; t < split.x.length; t++) {
         const word = Math.floor(t / perWord);
         tokens[word] =
@@ -700,6 +714,13 @@ export class DeviceDataset {
       mean: this.keep(meanArray),
       std: this.keep(stdArray),
     };
+  }
+
+  /** Destroy a Resident that `keep` made, and stop counting its bytes. */
+  private release(handle: Resident<Uint32Array>): void {
+    const at = this.handles.findIndex((h) => h.resident === handle);
+    if (at >= 0) this.handles.splice(at, 1);
+    handle.destroy();
   }
 
   private keep<T extends Uint32Array | Float32Array>(array: T): Resident<T> {

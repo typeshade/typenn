@@ -471,3 +471,133 @@ test("fake WebGPU: an epoch uploads one permutation, and a second epoch in the s
     await device.dispose();
   }
 });
+
+test("host fallback: tabular and regression batches equal the device batches bit for bit", async () => {
+  const device = await nn.device({ device: "cpu" });
+  const N = 9,
+    F = 5;
+  // Inexact mean and std, so the f32 rounding of each operation is visible.
+  const x = Float32Array.from(ints(N * F, 1000, 41), (v) => v / 7);
+  const y = Float32Array.from(ints(N, 100, 42), (v) => v / 3);
+  const options = {
+    inputs: {
+      kind: "tabular",
+      features: F,
+      mean: [0.1, 1 / 3, 7.7, 0.3, 2],
+      std: [0.3, 1e-1, 3.3, 0, 1 / 7],
+    },
+    train: { count: N, x, y },
+    test: { count: N, x, y },
+    target: { mean: 0.7, std: 0.3 },
+  };
+  const onDevice = device.dataset(options);
+  // One sample takes 20 bytes, so a 4-byte shard cannot hold it: the batches are built on the host.
+  const onHost = device.dataset({ ...options, shardBytes: 4 });
+  assert.equal(onDevice.residency.tier, "device");
+  assert.equal(onHost.residency.tier, "host");
+  const order = permutation(N, 43);
+  onDevice.order(order);
+  onHost.order(order);
+  for (const [a, b] of [
+    [onDevice.batch(0, 9), onHost.batch(0, 9)],
+    [[...onDevice.evaluation(4)].at(-1), [...onHost.evaluation(4)].at(-1)],
+  ]) {
+    assert.deepEqual(await values(b.input), await values(a.input));
+    assert.deepEqual(await values(b.labels), await values(a.labels));
+  }
+  // A zero target std is read as 1 on both tiers.
+  const zero = { ...options, target: { mean: 1, std: 0 } };
+  for (const shardBytes of [undefined, 4]) {
+    const dataset = device.dataset({ ...zero, shardBytes });
+    assert.deepEqual(
+      await values(dataset.batch(0, 2).labels),
+      [0, 1].map((s) => Math.fround(y[s] - 1)),
+    );
+    dataset.dispose();
+  }
+  onDevice.dispose();
+  onHost.dispose();
+  await device.dispose();
+});
+
+test("order: a batch made before a new order never reads the new order", async () => {
+  const x = Uint8Array.from([0, 10, 20, 30, 40, 50, 60, 70]);
+  const y = Uint8Array.from([0, 1, 2, 3]);
+  const options = {
+    inputs: { kind: "images", features: 2 },
+    train: { count: 4, x, y },
+    test: { count: 4, x, y },
+  };
+  // On the CPU tier a Resident still holds its host copy, so the old batch reads the old order.
+  const cpu = await nn.device({ device: "cpu" });
+  const cpuData = cpu.dataset(options);
+  const cpuBefore = cpuData.batch(0, 2);
+  cpuData.order([3, 2, 1, 0]);
+  assert.deepEqual(await values(cpuBefore.labels), [0, 1]);
+  assert.deepEqual(await values(cpuData.batch(0, 2).labels), [3, 2]);
+  cpuData.dispose();
+  await cpu.dispose();
+  // On WebGPU the old order is destroyed, so computing the old batch throws.
+  const fake = fakeGpu();
+  const gpu = await nn.device({ device: "webgpu", gpuDevice: fake.device });
+  const gpuData = gpu.dataset(options);
+  const computed = gpuData.batch(2, 2);
+  await computed.labels.data();
+  const gpuBefore = gpuData.batch(0, 2);
+  gpuData.order([3, 2, 1, 0]);
+  await assert.rejects(gpuBefore.labels.data(), /destroyed/);
+  gpuData.dispose();
+  await gpu.dispose();
+});
+
+test("validation: mixed label kinds throw, and an empty text corpus still batches", async () => {
+  const device = await nn.device({ device: "cpu" });
+  const images = {
+    inputs: { kind: "images", features: 2 },
+    train: { count: 2, x: new Uint8Array(4), y: Uint8Array.from([0, 1]) },
+  };
+  assert.throws(
+    () =>
+      device.dataset({
+        ...images,
+        test: { count: 2, x: new Uint8Array(4), y: Float32Array.from([0, 1]) },
+      }),
+    TypeError,
+  );
+  const empty = {
+    count: 2,
+    x: new Uint16Array(0),
+    y: Uint8Array.from([0, 1]),
+    offsets: new Uint32Array(3),
+  };
+  const dataset = device.dataset({
+    inputs: { kind: "text", vocab: 3 },
+    train: empty,
+    test: empty,
+  });
+  assert.deepEqual(await values(dataset.batch(0, 2).input), [0, 0, 0, 0, 0, 0]);
+  dataset.dispose();
+  await device.dispose();
+});
+
+test("shards: the rows of a shard follow from the shard size, with a sample of CIFAR-10 width", async () => {
+  const device = await nn.device({ device: "cpu" });
+  // 3072 u8 values are 768 words per sample. A shard of 3072 * 7 + 2 bytes holds 7 samples (a
+  // partial word never holds a sample) and 20 samples take 3 shards.
+  const F = 3072;
+  const make = (shardBytes) =>
+    device.dataset({
+      inputs: { kind: "images", features: F },
+      train: { count: 20, x: new Uint8Array(20 * F), y: new Uint8Array(20) },
+      test: { count: 3, x: new Uint8Array(3 * F), y: new Uint8Array(3) },
+      shardBytes,
+    });
+  const dataset = make(F * 7 + 2);
+  assert.deepEqual(dataset.residency.shards, { train: 3, test: 1 });
+  dataset.dispose();
+  // One sample is 3072 bytes: a shard of 3071 bytes cannot hold it.
+  const host = make(F - 1);
+  assert.equal(host.residency.tier, "host");
+  host.dispose();
+  await device.dispose();
+});

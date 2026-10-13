@@ -565,8 +565,14 @@ guaranteed value) otherwise. Pass `shardBytes` to set it.
 
 `dataset.residency` says where the batches are built. `{ tier: "device" }` means on the device.
 `{ tier: "host" }` means each batch is built on the host and uploaded, with a `reason`: on the
-WebGL2 tier, or when a sample does not fit a shard. `dataset.bytes` is the device memory the dataset
+WebGL2 tier, when a sample does not fit a shard, or when a text source is larger than one shard
+(text is not sharded). `dataset.bytes` is the device memory the dataset
 holds. `dispose()` frees it, and a later use throws.
+
+A batch is valid until the next `shuffle()` or `order()`. Compute it (read it, or use it in a step)
+before that call. The new order is a new device array, so on WebGPU a batch made earlier and not yet
+computed throws when it runs, and does not read the new order. The host tier takes its rows when
+`batch()` is called.
 
 ## Long-axis softmax and GPU performance
 

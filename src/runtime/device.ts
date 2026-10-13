@@ -331,10 +331,18 @@ export class Device {
    */
   storageBindingLimit(): number | undefined {
     const gpu = this.runtime?.device as
-      | { readonly limits?: { readonly maxStorageBufferBindingSize?: number } }
+      | {
+          readonly limits?: {
+            readonly maxStorageBufferBindingSize?: number;
+            readonly maxBufferSize?: number;
+          };
+        }
       | undefined;
-    const limit = gpu?.limits?.maxStorageBufferBindingSize;
-    return typeof limit === "number" ? limit : undefined;
+    const binding = gpu?.limits?.maxStorageBufferBindingSize;
+    if (typeof binding !== "number") return undefined;
+    // A shard is one buffer, so it also fits maxBufferSize.
+    const buffer = gpu?.limits?.maxBufferSize;
+    return typeof buffer === "number" ? Math.min(binding, buffer) : binding;
   }
 
   /** @internal */
