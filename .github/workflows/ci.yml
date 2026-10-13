@@ -45,3 +45,6 @@ jobs:
       # `chromium.launch()` runs.
       - run: npx playwright-core install --with-deps --only-shell chromium
       - run: npm run test:gpu
+      # Smoke-test the new benchmark harness on SwiftShader; never interpret this
+      # measurement as a hardware-GPU speed result.
+      - run: node scripts/bench-softmax.mjs --axis-sizes 63,64 --rows 2 --steps 1 --warmup 0
