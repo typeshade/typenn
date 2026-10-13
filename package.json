@@ -16,7 +16,7 @@
     "playwright-core": "1.56.1",
     "prettier": "^3.9.10",
     "typescript": "^5.6.3",
-    "typeshade": "https://github.com/typeshade/typeshade/archive/5fb79c7e03118fddb3d43c02005770dc59c25e6a.tar.gz",
+    "typeshade": "https://github.com/typeshade/typeshade/archive/96dbaa9fa7208aa786a4937a8c90521e59023ffa.tar.gz",
     "vite": "^6.0.0",
     "wrangler": "^4.147.0"
   },

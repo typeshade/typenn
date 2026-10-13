@@ -1,5 +1,5 @@
 // A recording stand-in for a WebGPU device, after the `fakeGpu` of TypeShade's own fuse tests
-// (src/fuse.test.ts at 5fb79c7). It makes nothing, records the commands it is given in order, and
+// (src/fuse.test.ts at 96dbaa9). It makes nothing, records the commands it is given in order, and
 // reads every buffer back as zeros: it proves the plan (the dispatches, the submissions and the
 // groups), never a value. Hand it to TypeNN with `nn.device({ device: "webgpu", gpuDevice })`.
 
