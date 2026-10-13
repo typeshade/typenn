@@ -74,13 +74,15 @@ export async function inPage(body, argument, options = {}) {
   await new Promise((done) => server.listen(0, "127.0.0.1", done));
   const browser = await chromium.launch({
     executablePath: process.env.TYPESHADE_CHROMIUM || undefined,
-    args: [
-      "--enable-unsafe-webgpu",
-      "--enable-unsafe-swiftshader",
-      "--use-angle=swiftshader",
-      "--use-vulkan=swiftshader",
-      "--enable-features=Vulkan",
-    ],
+    args: options.hardware
+      ? ["--enable-unsafe-webgpu"]
+      : [
+          "--enable-unsafe-webgpu",
+          "--enable-unsafe-swiftshader",
+          "--use-angle=swiftshader",
+          "--use-vulkan=swiftshader",
+          "--enable-features=Vulkan",
+        ],
   });
   const logged = [];
   try {

@@ -268,3 +268,118 @@ test("on the CPU tier the plan has no dispatch and no submission", async () => {
     await device.dispose();
   }
 });
+
+test("long-axis softmax reduces normalization once per slice, not once per output", async () => {
+  await onFakeGpu(async (device) => {
+    const x = device.tensor(new Float32Array(2 * 129 * 3), {
+      shape: [2, 129, 3],
+    });
+    const y = x.softmax(1);
+    await y.data();
+    const calls = device.lastReport.groups.flatMap((group) => group.calls);
+    assert.deepEqual(calls, ["softmaxStatistics", "softmaxFromStatistics"]);
+    assert.equal(device.lastReport.dispatches, 2);
+
+    const upstream = device.tensor(new Float32Array(2 * 129 * 3), {
+      shape: [2, 129, 3],
+    });
+    const [gradient] = nn.gradients(y, [x], upstream);
+    await gradient.data();
+    const backward = device.lastReport.groups.flatMap((group) => group.calls);
+    assert.deepEqual(backward, [
+      "softmaxGradReduction",
+      "softmaxGradFromReduction",
+    ]);
+  });
+});
+
+test("long-axis log softmax uses its own per-slice gradient reduction", async () => {
+  await onFakeGpu(async (device) => {
+    const x = device.tensor(new Float32Array(2 * 129 * 3), {
+      shape: [2, 129, 3],
+    });
+    const y = x.logSoftmax(1);
+    await y.data();
+    assert.deepEqual(
+      device.lastReport.groups.flatMap((group) => group.calls),
+      ["softmaxStatistics", "logSoftmaxFromStatistics"],
+    );
+    const upstream = device.tensor(new Float32Array(2 * 129 * 3), {
+      shape: [2, 129, 3],
+    });
+    const [gradient] = nn.gradients(y, [x], upstream);
+    await gradient.data();
+    assert.deepEqual(
+      device.lastReport.groups.flatMap((group) => group.calls),
+      ["logSoftmaxGradReduction", "logSoftmaxGradFromReduction"],
+    );
+  });
+});
+
+test("short-axis softmax keeps the original single dispatch", async () => {
+  await onFakeGpu(async (device) => {
+    const x = vector(device, new Float32Array(63));
+    await x.softmax().data();
+    assert.deepEqual(
+      device.lastReport.groups.flatMap((group) => group.calls),
+      ["softmax"],
+    );
+    assert.equal(device.lastReport.dispatches, 1);
+  });
+});
+
+test("short-axis log softmax and its gradient fuse only while the gradient reads its operands at the own index", async () => {
+  await onFakeGpu(async (device) => {
+    const make = (fill) =>
+      device.tensor(new Float32Array(2 * 63).fill(fill), { shape: [2, 63] });
+    const groups = async (op, scaleUpstream) => {
+      const x = make(1);
+      const upstream = make(1);
+      const [gradient] = nn.gradients(
+        x[op](),
+        [x],
+        // A computed upstream is read at other indices by the row reduction.
+        scaleUpstream ? upstream.mul(make(0.5)) : upstream,
+      );
+      await gradient.data();
+      return device.lastReport.groups.map((group) => group.calls);
+    };
+    // The upstream is a leaf: log softmax reads `value[i]` only, so one dispatch.
+    assert.deepEqual(await groups("logSoftmax", false), [
+      ["logSoftmax", "logSoftmaxGrad"],
+    ]);
+    // The softmax gradient reads `value` along the row, so the forward kernel stays apart.
+    assert.deepEqual(await groups("softmax", false), [
+      ["softmax"],
+      ["softmaxGrad"],
+    ]);
+    // A computed upstream is read along the row by the log softmax gradient too.
+    const computed = (await groups("logSoftmax", true)).map((g) => g.join("+"));
+    assert.ok(
+      !computed.some((g) => g.includes("mul") && g.includes("logSoftmaxGrad")),
+      computed.join(" | "),
+    );
+  });
+});
+
+test("the crossover is exactly 64: axis 64 is two-pass in the forward and the backward pass", async () => {
+  await onFakeGpu(async (device) => {
+    const x = vector(device, new Float32Array(64));
+    const y = x.softmax();
+    await y.data();
+    assert.deepEqual(
+      device.lastReport.groups.flatMap((group) => group.calls),
+      ["softmaxStatistics", "softmaxFromStatistics"],
+    );
+    const [gradient] = nn.gradients(
+      y,
+      [x],
+      vector(device, new Float32Array(64)),
+    );
+    await gradient.data();
+    assert.deepEqual(
+      device.lastReport.groups.flatMap((group) => group.calls),
+      ["softmaxGradReduction", "softmaxGradFromReduction"],
+    );
+  });
+});

@@ -39,6 +39,7 @@ const { values: flags } = parseArgs({
     steps: { type: "string", default: "20" },
     warmup: { type: "string", default: "5" },
     device: { type: "string", default: "webgpu" },
+    hardware: { type: "boolean", default: false },
     scenario: { type: "string", default: "step" },
     loop: { type: "string", default: "read-first" },
     length: { type: "string", default: "1048576" },
@@ -53,7 +54,28 @@ async function measure({
   scenario,
   loop,
   length,
+  hardware,
 }) {
+  if (hardware && preference !== "webgpu")
+    throw new Error("--hardware requires --device webgpu.");
+  // The default harness forces SwiftShader. The hardware opt-in removes those
+  // Chromium flags and refuses a software/fallback WebGPU adapter.
+  let adapterInfo;
+  if (hardware) {
+    const adapter = await navigator.gpu?.requestAdapter();
+    if (!adapter) throw new Error("A native WebGPU adapter is unavailable.");
+    const info = adapter.info;
+    const description = [info?.vendor, info?.architecture, info?.description]
+      .filter(Boolean)
+      .join(" ");
+    if (
+      adapter.isFallbackAdapter ||
+      /swiftshader|llvmpipe|software|softpipe/i.test(description) ||
+      description.length === 0
+    )
+      throw new Error("Expected hardware WebGPU, got: " + description);
+    adapterInfo = description;
+  }
   const nn = await import("/dist/index.js");
   // The optimizer scenario makes the GPUDevice itself, so that it can wait for the queue to finish
   // the work of a step: a step with no read-back returns before the device has run it.
@@ -146,7 +168,7 @@ async function measure({
       await otherLoss.backward();
       const optimizer = new nn.SGD(other.parameters(), { lr: 0.1 });
       counts.mnistBackwardOptimizerStep = await counted(() => optimizer.step());
-      return { backend: device.backend, counts };
+      return { backend: device.backend, adapterInfo, counts };
     }
     let step;
     let parameters = [];
@@ -201,6 +223,7 @@ async function measure({
         : (sorted[steps / 2 - 1] + sorted[steps / 2]) / 2;
     return {
       backend: device.backend,
+      adapterInfo,
       seen,
       medianMs: median,
       minMs: sorted[0],
@@ -222,12 +245,13 @@ const { result } = await inPage(
     scenario: flags.scenario,
     loop: flags.loop,
     length: Number(flags.length),
+    hardware: flags.hardware,
   },
-  { dist },
+  { dist, hardware: flags.hardware },
 );
 if (flags.scenario === "counts") {
   console.log(
-    `The calls the device is given for one data(), on ${result.backend.name} (SwiftShader), build ${dist}`,
+    `The calls the device is given for one data(), on ${result.backend.name} (${flags.hardware ? result.adapterInfo : "SwiftShader"}), build ${dist}`,
   );
   for (const [name, seen] of Object.entries(result.counts))
     console.log(
@@ -236,7 +260,7 @@ if (flags.scenario === "counts") {
   console.log(JSON.stringify({ dist, ...result }));
 } else {
   console.log(
-    `${flags.scenario === "chain" ? `chain of ${flags.length} elements` : flags.scenario === "cnn" ? "CNN training step, batch 64" : "MNIST training step, batch 64"}, loop ${flags.loop}, ${flags.steps} runs after ${flags.warmup} warm-up runs, on ${result.backend.name} (SwiftShader), build ${dist}`,
+    `${flags.scenario === "chain" ? `chain of ${flags.length} elements` : flags.scenario === "cnn" ? "CNN training step, batch 64" : "MNIST training step, batch 64"}, loop ${flags.loop}, ${flags.steps} runs after ${flags.warmup} warm-up runs, on ${result.backend.name} (${flags.hardware ? result.adapterInfo : "SwiftShader"}), build ${dist}`,
   );
   console.log(
     `median ${result.medianMs.toFixed(1)} ms, least ${result.minMs.toFixed(1)} ms, most ${result.maxMs.toFixed(1)} ms; the device was given ${result.seen.dispatches} dispatches in ${result.seen.submissions} submissions for one run`,
