@@ -890,6 +890,66 @@ function softmaxNonFiniteCases() {
   return cases;
 }
 
+/**
+ * The operands of a softmax and of its gradient are the outputs of earlier kernels (a product by
+ * 2 and a product by 0.5, both exact in f32). A kernel that reads its operand at an index other
+ * than its own must not be fused with the kernel that writes that operand, so these cases hold
+ * every fusion decision around the softmax kernels to the reference, on both sides of the
+ * crossover and on a non-last axis.
+ * @returns {Case[]}
+ */
+function softmaxComputedOperandCases() {
+  const cases = [];
+  const constant = (device, shape, value) =>
+    device.tensor(new Float32Array(sizeOf(shape)).fill(value), { shape });
+  for (const [name, log] of [
+    ["softmax", false],
+    ["logSoftmax", true],
+  ])
+    for (const [shape, axis] of [
+      [[2, 63], 1],
+      [[2, 64], 1],
+      [[2, 63, 3], 1],
+      [[2, 65, 3], 1],
+    ]) {
+      const x = values(nextSeed(), sizeOf(shape), -4, 4);
+      const dy = values(nextSeed(), sizeOf(shape), -2, 2);
+      cases.push({
+        name: `gradient of ${name} on computed operands, shape [${shape}], axis ${axis}`,
+        tolerance: 1e-5,
+        gpuTolerance: 1e-5,
+        run: async (nn, device) => {
+          const input = device.tensor(
+            Float32Array.from(x, (v) => v / 2),
+            { shape },
+          );
+          const upstream = device.tensor(
+            Float32Array.from(dy, (v) => v * 2),
+            { shape },
+          );
+          const [gradient] = nn.gradients(
+            input.mul(constant(device, shape, 2))[name](axis),
+            [input],
+            upstream.mul(constant(device, shape, 0.5)),
+          );
+          // d(input) = 2 * d(2 * input): the reference is for x, the factor is exact.
+          const reference = softmaxGradReference(
+            softmaxReference(x, shape, axis, log),
+            dy,
+            shape,
+            axis,
+            log,
+          );
+          return {
+            actual: await gradient.data(),
+            expected: Float32Array.from(reference, (v) => v * 2),
+          };
+        },
+      });
+    }
+  return cases;
+}
+
 export function softmaxAndLossCases() {
   seed = 3000;
   return [
@@ -898,6 +958,7 @@ export function softmaxAndLossCases() {
     ...softmaxLargeOffsetCases(),
     ...softmaxGradientCheckCases(),
     ...softmaxNonFiniteCases(),
+    ...softmaxComputedOperandCases(),
   ];
 }
 
