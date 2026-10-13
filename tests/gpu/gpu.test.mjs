@@ -479,3 +479,68 @@ for (const [tier, residency] of [
     );
   });
 }
+
+test("a device batch under Flatten and Linear trains on WebGPU: its weight gradient is the host batch's", async () => {
+  // The lab's MLP starts with Flatten and takes device batches. The batch is a gather with no
+  // gradient rule: backward() on WebGPU must not ask for one.
+  const { result, logged } = await inPage(async () => {
+    const nn = await import("/dist/index.js");
+    const device = await nn.device("webgpu");
+    const rows = 6;
+    const side = 2;
+    const classes = 3;
+    const features = side * side;
+    const x = Uint8Array.from(
+      { length: rows * features },
+      (_, i) => (i * 37 + 11) % 256,
+    );
+    const y = Uint8Array.from({ length: rows }, (_, i) => (i * 5) % classes);
+    const data = device.dataset({
+      inputs: { kind: "images", features, shape: [side, side] },
+      train: { count: rows, x, y },
+      test: { count: rows, x, y },
+    });
+    const weightGradient = async (input, labels) => {
+      const model = new nn.Sequential(
+        new nn.Flatten(),
+        new nn.Linear(features, 8, { seed: 3 }),
+        new nn.ReLU(),
+        new nn.Dropout(0.2, { seed: 5 }),
+        new nn.Linear(8, classes, { seed: 4 }),
+      ).to(device);
+      const loss = new nn.CrossEntropyLoss().forward(
+        model.forward(input),
+        labels,
+      );
+      await loss.backward();
+      return Array.from(await model.parameters()[0].grad.data());
+    };
+    try {
+      const batch = data.batch(0, rows);
+      const host = device.tensor(
+        Float32Array.from(x, (v) => v / 255),
+        {
+          shape: [rows, side, side],
+        },
+      );
+      return {
+        fromDevice: await weightGradient(batch.input, batch.labels),
+        fromHost: await weightGradient(host, Array.from(y)),
+        backend: device.backend.name,
+      };
+    } finally {
+      data.dispose();
+      await device.dispose();
+    }
+  });
+  assert.deepEqual(logged, []);
+  assert.equal(result.backend, "webgpu");
+  assert.equal(result.fromDevice.length, result.fromHost.length);
+  result.fromDevice.forEach((value, i) =>
+    assert.ok(
+      Math.abs(value - result.fromHost[i]) <=
+        1e-5 * Math.max(1, Math.abs(result.fromHost[i])),
+      `weight ${i}`,
+    ),
+  );
+});

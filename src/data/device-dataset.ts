@@ -5,7 +5,7 @@ import {
   gatherFirst,
   gatherNext,
 } from "../kernels/dataset.shade.ts";
-import type { OpNode } from "../tensor/node.js";
+import type { Backward, OpNode } from "../tensor/node.js";
 import { Tensor } from "../tensor/tensor.js";
 import {
   DEFAULT_SHARD_BYTES,
@@ -134,6 +134,12 @@ interface SplitState {
   readonly order: Uint32Array;
   readonly device?: DeviceSplitState;
 }
+
+/**
+ * The gradient rule of a batch: its sources are data, so no input of a batch has a gradient. A
+ * batch under a model's first layer is then a node the backward pass passes over.
+ */
+const noGradient: Backward = () => [];
 
 /** The seeded generator of `shuffle`: the mulberry32 generator of the lab, with the same sequence. */
 function mulberry32(seed: number): () => number {
@@ -517,6 +523,7 @@ export class DeviceDataset {
           field.width,
           field.isFloat,
         ],
+        backward: noGradient,
       } as const satisfies OpNode;
       previous = this.device.createOperation(shape, node as OpNode);
     }
@@ -542,6 +549,7 @@ export class DeviceDataset {
       inputs: [],
       arrays: [perm, text.tokens, text.offsets],
       values: [start, vocab, text.perWord, text.width],
+      backward: noGradient,
     });
   }
 
