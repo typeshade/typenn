@@ -31,12 +31,18 @@ const options = {
   requireHardware: flags.hardware,
 };
 if (
-  !Number.isSafeInteger(options.rows) || options.rows < 1 ||
-  !Number.isSafeInteger(options.steps) || options.steps < 1 ||
-  !Number.isSafeInteger(options.warmup) || options.warmup < 0 ||
+  !Number.isSafeInteger(options.rows) ||
+  options.rows < 1 ||
+  !Number.isSafeInteger(options.steps) ||
+  options.steps < 1 ||
+  !Number.isSafeInteger(options.warmup) ||
+  options.warmup < 0 ||
   options.sizes.length === 0 ||
   options.sizes.some((size) => !Number.isSafeInteger(size) || size < 1)
-) throw new RangeError("rows, axis sizes and steps must be positive safe integers.");
+)
+  throw new RangeError(
+    "rows, axis sizes and steps must be positive safe integers.",
+  );
 
 async function measure(arg) {
   const adapter = await navigator.gpu?.requestAdapter();
@@ -51,9 +57,16 @@ async function measure(arg) {
   };
   const identity = Object.values(gpu).join(" ").toLowerCase();
   const software = /swiftshader|llvmpipe|software|softpipe/.test(identity);
-  if (arg.requireHardware && (software || gpu.fallback ||
-    (gpu.vendor === "unknown" && gpu.description === "unknown")))
-    throw new Error("Native hardware WebGPU was requested, but no verified hardware adapter was found: " + JSON.stringify(gpu));
+  if (
+    arg.requireHardware &&
+    (software ||
+      gpu.fallback ||
+      (gpu.vendor === "unknown" && gpu.description === "unknown"))
+  )
+    throw new Error(
+      "Native hardware WebGPU was requested, but no verified hardware adapter was found: " +
+        JSON.stringify(gpu),
+    );
 
   const nn = await import("/dist/index.js");
   const device = await nn.device("webgpu");
@@ -84,8 +97,14 @@ async function measure(arg) {
             }
             const newReports = device.reports.slice(start);
             return {
-              dispatches: newReports.reduce((n, report) => n + report.dispatches, 0),
-              submissions: newReports.reduce((n, report) => n + report.submissions, 0),
+              dispatches: newReports.reduce(
+                (n, report) => n + report.dispatches,
+                0,
+              ),
+              submissions: newReports.reduce(
+                (n, report) => n + report.submissions,
+                0,
+              ),
             };
           };
           for (let k = 0; k < arg.warmup; k++) await run();
@@ -103,8 +122,10 @@ async function measure(arg) {
             rows: arg.rows,
             op,
             mode,
-            medianMs: n % 2 ? times[(n - 1) / 2] :
-              (times[n / 2 - 1] + times[n / 2]) / 2,
+            medianMs:
+              n % 2
+                ? times[(n - 1) / 2]
+                : (times[n / 2 - 1] + times[n / 2]) / 2,
             minMs: times[0],
             maxMs: times[n - 1],
             ...plan,
@@ -125,10 +146,16 @@ const { result, logged } = await inPage(measure, options, {
   dist,
   hardware: flags.hardware,
 });
-console.log(JSON.stringify({
-  build: dist,
-  requestedHardware: flags.hardware,
-  methodology: "end-to-end wall time including GPU readback",
-  ...result,
-  browserWarnings: logged,
-}, null, 2));
+console.log(
+  JSON.stringify(
+    {
+      build: dist,
+      requestedHardware: flags.hardware,
+      methodology: "end-to-end wall time including GPU readback",
+      ...result,
+      browserWarnings: logged,
+    },
+    null,
+    2,
+  ),
+);
