@@ -268,3 +268,39 @@ test("on the CPU tier the plan has no dispatch and no submission", async () => {
     await device.dispose();
   }
 });
+
+test("long-axis softmax reduces normalization once per slice, not once per output", async () => {
+  await onFakeGpu(async (device) => {
+    const x = device.tensor(new Float32Array(2 * 129 * 3), {
+      shape: [2, 129, 3],
+    });
+    const y = x.softmax(1);
+    await y.data();
+    const calls = device.lastReport.groups.flatMap((group) => group.calls);
+    assert.deepEqual(calls, ["softmaxLogSumExp", "softmaxFromLogSumExp"]);
+    assert.equal(device.lastReport.dispatches, 2);
+
+    const upstream = device.tensor(new Float32Array(2 * 129 * 3), {
+      shape: [2, 129, 3],
+    });
+    const [gradient] = nn.gradients(y, [x], upstream);
+    await gradient.data();
+    const backward = device.lastReport.groups.flatMap((group) => group.calls);
+    assert.deepEqual(backward, [
+      "softmaxGradReduction",
+      "softmaxGradFromReduction",
+    ]);
+  });
+});
+
+test("short-axis softmax keeps the original single dispatch", async () => {
+  await onFakeGpu(async (device) => {
+    const x = vector(device, new Float32Array(63));
+    await x.softmax().data();
+    assert.deepEqual(
+      device.lastReport.groups.flatMap((group) => group.calls),
+      ["softmax"],
+    );
+    assert.equal(device.lastReport.dispatches, 1);
+  });
+});
