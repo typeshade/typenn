@@ -35,8 +35,8 @@ The operation set is:
 - NHWC `conv2d`, `maxPool` and `avgPool`
 - `reshape`
 
-[TODO.md](./TODO.md) lists what is open. `Linear`, `ReLU`, and `Sequential` compose operations for
-inference:
+[TODO.md](./TODO.md) lists what is open. `Linear`, `Conv2d`, `MaxPool2d`, `AvgPool2d`, `ReLU`, `Tanh`, `Sigmoid` and `Sequential` compose
+operations for inference:
 
 ```ts
 const model = new nn.Sequential(new nn.Linear(784, 10));
@@ -88,6 +88,29 @@ dispatch for it. `dispose()` and `disposeGraph()` free the arrays. A call that t
 twice, such as `a.add(a)`, reads the second one from a copy in a scratch array. One `Resident` must
 not be two parameters of one call. If a plan fails, TypeNN frees the arrays of that plan and
 rethrows the error. The next `data()` computes them again.
+
+## Inspecting a graph
+
+`nn.graph(tensor)` returns the graph under a Tensor. It lists each reachable Tensor once. An input
+comes before each Tensor that uses it:
+
+```ts
+const snapshot = nn.graph(a.matmul(b).add(c).relu());
+for (const node of snapshot.nodes)
+  console.log(node.id, node.op, node.shape, node.inputs);
+```
+
+Each node has an `id`, which stays the same for the life of its Tensor. `computed` is true when the
+Tensor already holds an array. `computed` is true for every input Tensor. A later `data()` does not
+compute it.
+
+After a read, `device.lastPlan` describes the plan. Its `report` is the `FuseReport`, and its `nodes`
+holds the graph id of each kernel call, in call order. The calls of `report.groups` line up with
+`nodes`. A copy that a repeated input needs takes the id of the operation that reads it.
+`device.lastReport` and `device.reports` do not change.
+
+If a plan fails, `device.lastPlan`, `device.lastReport` and `device.reports` keep the values they had
+before the failed plan.
 
 ## Devices and tiers
 
@@ -242,7 +265,7 @@ console.log(await weightGradient.data());
 
 `gradients(output, wrt, upstream?)` returns deferred gradient Tensors. Without an explicit
 `upstream`, `output` must contain one value. The first graph rules cover ReLU, broadcast
-add/subtract/multiply/divide, unary arithmetic and trigonometric ops, rank-2 MatMul including
+add/subtract/multiply/divide, unary arithmetic and trigonometric ops, `sigmoid` and `tanh`, rank-2 MatMul including
 transpose options, Conv2D, 2D pooling, `sum`/`mean` reductions, and logits-based softmax cross
 entropy. `prod`/`max`/`min` reduction gradients and special activation gradients remain
 unsupported, and ask for the missing rule by name when called.
@@ -256,7 +279,12 @@ unsupported, and ask for the missing rule by name when called.
 - Intermediate tensors stay resident until disposed or the device is disposed. Use `disposeGraph()`
   to release an operation graph while preserving parameters.
 - `Module.to()`, `parameters()`, `train()`, and `eval()` support user-defined models and
-  registered child layers. `Flatten`, `Linear`/`Dense`, `ReLU`, and `Dropout` cover the example.
+  registered child layers. `Flatten`, `Linear`/`Dense`, `Conv2d`, `MaxPool2d`, `AvgPool2d`, `ReLU`, `Tanh`, `Sigmoid` and
+  `Dropout` are the layers. `MaxPool2d` and `AvgPool2d` default `strides` to `filterSize`
+  (the `maxPool` and `avgPool` operations default it to 1). The example uses
+  `Flatten`, `Linear`, `ReLU` and `Dropout`. The losses are `CrossEntropyLoss`, with sparse integer
+  labels, and `MSELoss`, the mean of squared differences. They are `nn.loss.crossEntropy` and
+  `nn.loss.mse`.
 - `Tensor.backward()` accumulates gradients on registered parameter leaves. SGD and Adam
   optimizer objects update host parameter arrays. Adam is not yet a device kernel.
 - Tensor-graph autograd remains limited. Model serialization and WebNN are not implemented.

@@ -6,6 +6,7 @@ import {
   type Runtime,
 } from "typeshade/runtime";
 import type { FuseReport } from "typeshade/fuse";
+import type { DevicePlan } from "./device-types.js";
 import { checkedShape, sizeOf, type Shape } from "../tensor/shape.js";
 import type { OpNode } from "../tensor/node.js";
 import { Tensor } from "../tensor/tensor.js";
@@ -36,6 +37,7 @@ export class Device {
   private readonly live = new Set<Resident<Float32Array>>();
   private readonly pending = new Set<Promise<unknown>>();
   private readonly history: FuseReport[] = [];
+  private plan?: DevicePlan;
   private readonly memory: Memory = {
     keep: (values) => {
       const array = resident(values);
@@ -46,9 +48,10 @@ export class Device {
       this.live.delete(array);
       array.destroy();
     },
-    record: (report) => {
+    record: (report, nodes) => {
       this.history.push(report);
       if (this.history.length > REPORT_HISTORY) this.history.shift();
+      this.plan = { report, nodes: nodes.slice() };
     },
   };
   private runtime?: Runtime;
@@ -120,6 +123,15 @@ export class Device {
   /** The report of the last plan a `data()` ran, or undefined before the first. */
   get lastReport(): FuseReport | undefined {
     return this.history[this.history.length - 1];
+  }
+
+  /**
+   * The last plan the executor ran, with the graph id of each kernel call in its scope
+   * (`nodes[k]` for the k-th call), or undefined before the first. A failed plan leaves
+   * `lastPlan`, `lastReport` and `reports` as they were.
+   */
+  get lastPlan(): DevicePlan | undefined {
+    return this.plan;
   }
 
   /** The reports of the last 256 plans, oldest first. */

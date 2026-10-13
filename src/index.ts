@@ -6,6 +6,7 @@ export {
   type DevicePreference,
   type ExecutionTier,
 } from "./runtime/device.js";
+export type { DevicePlan } from "./runtime/device-types.js";
 export type { FuseReport } from "typeshade/fuse";
 // TypeShade autodiff is for pure Shade functions, not TypeNN Tensor graphs.
 export {
@@ -21,6 +22,7 @@ export {
   type Conv2DOptions,
   type Pool2DOptions,
 } from "./tensor/tensor.js";
+export { graph, type GraphNode, type GraphSnapshot } from "./tensor/inspect.js";
 export { gradients } from "./autograd.js";
 export type { Shape } from "./tensor/shape.js";
 export { Module } from "./nn/module.js";
@@ -29,14 +31,22 @@ export {
   CrossEntropyLoss,
   crossEntropyLoss,
   loss,
+  MSELoss,
+  mseLoss,
   type CrossEntropyOptions,
 } from "./nn/loss/index.js";
 export {
+  AvgPool2d,
+  Conv2d,
   Dense,
   Dropout,
   Flatten,
   Linear,
+  MaxPool2d,
   ReLU,
+  Sigmoid,
+  Tanh,
+  type Conv2dOptions,
   type DropoutOptions,
   type LinearOptions,
 } from "./nn/layers.js";
