@@ -30,6 +30,7 @@ const { values: flags } = parseArgs({
     steps: { type: "string", default: "20" },
     warmup: { type: "string", default: "5" },
     device: { type: "string", default: "webgpu" },
+    hardware: { type: "boolean", default: false },
     scenario: { type: "string", default: "step" },
     length: { type: "string", default: "1048576" },
   },
@@ -42,7 +43,28 @@ async function measure({
   device: preference,
   scenario,
   length,
+  hardware,
 }) {
+  if (hardware && preference !== "webgpu")
+    throw new Error("--hardware requires --device webgpu.");
+  // The default harness forces SwiftShader. The hardware opt-in removes those
+  // Chromium flags and refuses a software/fallback WebGPU adapter.
+  let adapterInfo;
+  if (hardware) {
+    const adapter = await navigator.gpu?.requestAdapter();
+    if (!adapter) throw new Error("A native WebGPU adapter is unavailable.");
+    const info = adapter.info;
+    const description = [info?.vendor, info?.architecture, info?.description]
+      .filter(Boolean)
+      .join(" ");
+    if (
+      adapter.isFallbackAdapter ||
+      /swiftshader|llvmpipe|software|softpipe/i.test(description) ||
+      description.length === 0
+    )
+      throw new Error("Expected hardware WebGPU, got: " + description);
+    adapterInfo = description;
+  }
   const nn = await import("/dist/index.js");
   const device = await nn.device(preference);
   // The calls the device is given while `run` runs.
@@ -118,7 +140,7 @@ async function measure({
       await otherLoss.backward();
       const optimizer = new nn.SGD(other.parameters(), { lr: 0.1 });
       counts.mnistBackwardOptimizerStep = await counted(() => optimizer.step());
-      return { backend: device.backend, counts };
+      return { backend: device.backend, adapterInfo, counts };
     }
     let step;
     let parameters = [];
@@ -157,6 +179,7 @@ async function measure({
         : (sorted[steps / 2 - 1] + sorted[steps / 2]) / 2;
     return {
       backend: device.backend,
+      adapterInfo,
       seen,
       medianMs: median,
       minMs: sorted[0],
@@ -177,12 +200,13 @@ const { result } = await inPage(
     device: flags.device,
     scenario: flags.scenario,
     length: Number(flags.length),
+    hardware: flags.hardware,
   },
-  { dist },
+  { dist, hardware: flags.hardware },
 );
 if (flags.scenario === "counts") {
   console.log(
-    `The calls the device is given for one data(), on ${result.backend.name} (SwiftShader), build ${dist}`,
+    `The calls the device is given for one data(), on ${result.backend.name} (${flags.hardware ? result.adapterInfo : "SwiftShader"}), build ${dist}`,
   );
   for (const [name, seen] of Object.entries(result.counts))
     console.log(
