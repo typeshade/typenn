@@ -1,0 +1,20 @@
+---
+import { Code } from "astro:components";
+
+interface Props {
+  title: string;
+  file: string;
+  code: string;
+  lang?: string;
+}
+
+const { title, file, code, lang = "ts" } = Astro.props;
+---
+
+<figure class="code-frame">
+  <figcaption class="code-caption">
+    <span>{title}</span>
+    <span class="code-file">{file}</span>
+  </figcaption>
+  <Code code={code} lang={lang} theme="github-dark" />
+</figure>
