@@ -28,6 +28,7 @@ import {
   reduceGradReference,
   reduceReference,
   sizeOf,
+  softmaxExact,
   softmaxGradReference,
   softmaxReference,
   values,
@@ -757,9 +758,147 @@ function lossCases() {
   return cases;
 }
 
+/**
+ * Long-axis softmax at large offsets: the peak and the sum of a slice are kept apart, so the
+ * low bits of the sum survive a large peak. Axes 63 and 64 are the direct path, 65 and 257 the
+ * two-pass path. The reference is double precision (`softmaxExact`).
+ * @returns {Case[]}
+ */
+function softmaxLargeOffsetCases() {
+  const cases = [];
+  for (const [name, log] of [
+    ["softmax", false],
+    ["logSoftmax", true],
+  ])
+    for (const offset of [1e3, 1e4, 1e5])
+      for (const axis of [63, 64, 65, 257]) {
+        const shape = [2, axis];
+        // Two rows of `offset + 3 sin(0.9 i)`, as the review measured.
+        const x = Float32Array.from({ length: 2 * axis }, (_, i) =>
+          Math.fround(offset + 3 * Math.sin(0.9 * i)),
+        );
+        const label = `${name}, offset ${offset}, axis ${axis}`;
+        if (!log)
+          cases.push({
+            name: `${label}: row sums`,
+            tolerance: 1e-5,
+            gpuTolerance: 1e-5,
+            run: async (_nn, device) => {
+              const y = await device.tensor(x, { shape }).softmax(1).data();
+              const sums = [0, 0];
+              for (let i = 0; i < y.length; i++)
+                sums[Math.floor(i / axis)] += y[i];
+              return { actual: sums, expected: [1, 1] };
+            },
+          });
+        cases.push({
+          name: `${label}: values`,
+          tolerance: 1e-5,
+          gpuTolerance: 1e-5,
+          run: async (_nn, device) => ({
+            actual: await device.tensor(x, { shape })[name](1).data(),
+            expected: softmaxExact(x, shape, 1, log),
+          }),
+        });
+      }
+  return cases;
+}
+
+/**
+ * The gradient of a softmax or a log softmax by central differences of the double precision
+ * reference, on the direct path (63) and the two-pass path (65), at offset 0 and at 1e3.
+ * @returns {Case[]}
+ */
+function softmaxGradientCheckCases() {
+  const cases = [];
+  const h = 1e-5;
+  for (const [name, log] of [
+    ["softmax", false],
+    ["logSoftmax", true],
+  ])
+    for (const axis of [63, 65])
+      for (const offset of [0, 1e3]) {
+        const shape = [2, axis];
+        const x = Float32Array.from({ length: 2 * axis }, (_, i) =>
+          Math.fround(offset + 4 * Math.sin(0.7 * i + 0.3)),
+        );
+        const dy = Float32Array.from({ length: 2 * axis }, (_, i) =>
+          Math.fround(2 * Math.cos(0.23 * i)),
+        );
+        cases.push({
+          name: `central-difference gradient of ${name}, axis ${axis}, offset ${offset}`,
+          tolerance: 1e-5,
+          gpuTolerance: 1e-5,
+          run: async (nn, device) => {
+            const input = device.tensor(x, { shape });
+            const [gradient] = nn.gradients(
+              input[name](1),
+              [input],
+              device.tensor(dy, { shape }),
+            );
+            const loss = (point) => {
+              const y = softmaxExact(point, shape, 1, log);
+              let total = 0;
+              for (let i = 0; i < y.length; i++) total += dy[i] * y[i];
+              return total;
+            };
+            const numeric = new Float64Array(x.length);
+            for (let j = 0; j < x.length; j++) {
+              const up = Float64Array.from(x);
+              const down = Float64Array.from(x);
+              up[j] += h;
+              down[j] -= h;
+              numeric[j] = (loss(up) - loss(down)) / (2 * h);
+            }
+            return { actual: await gradient.data(), expected: numeric };
+          },
+        });
+      }
+  return cases;
+}
+
+/**
+ * Non-finite inputs on both paths (CPU tier only). A slice with a NaN or a +Inf is NaN in full;
+ * a -Inf is 0 for softmax and -Inf for log softmax at its own element, the rest finite.
+ * @returns {Case[]}
+ */
+function softmaxNonFiniteCases() {
+  const cases = [];
+  for (const [name, log] of [
+    ["softmax", false],
+    ["logSoftmax", true],
+  ])
+    for (const axis of [63, 65]) {
+      const shape = [3, axis];
+      const x = Float32Array.from({ length: 3 * axis }, (_, i) =>
+        Math.fround(Math.sin(0.5 * i)),
+      );
+      x[5] = NaN; // row 0
+      x[axis + 7] = Infinity; // row 1
+      x[2 * axis + 9] = -Infinity; // row 2, finite elsewhere
+      cases.push({
+        name: `${name}, axis ${axis}: NaN, +Inf and -Inf inputs`,
+        tolerance: 1e-5,
+        gpuTolerance: 1e-5,
+        cpuOnly: true,
+        run: async (_nn, device) => ({
+          actual: await device.tensor(x, { shape })[name](1).data(),
+          expected: softmaxExact(x, shape, 1, log),
+        }),
+      });
+    }
+  return cases;
+}
+
 export function softmaxAndLossCases() {
   seed = 3000;
-  return [...softmaxCases(), ...lossCases()];
+  return [
+    ...softmaxCases(),
+    ...lossCases(),
+    ...softmaxLargeOffsetCases(),
+    ...softmaxGradientCheckCases(),
+    ...softmaxNonFiniteCases(),
+  ];
 }
 
 // ─── conv2d and pooling ───────────────────────────────────────────────────────────────────────

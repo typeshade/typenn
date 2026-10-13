@@ -502,6 +502,30 @@ export function softmaxReference(x, shape, axis, log = false) {
   return out;
 }
 
+/**
+ * The softmax, or the log softmax, of `x` over `axis`, in double precision, for any numeric input.
+ * The output is not rounded to float32, so it is the value the float32 kernels are held to.
+ */
+export function softmaxExact(x, shape, axis, log = false) {
+  const { outer, axisSize, inner } = axisLayout(shape, axis);
+  const out = new Float64Array(x.length);
+  for (let o = 0; o < outer; o++)
+    for (let n = 0; n < inner; n++) {
+      const at = (k) => (o * axisSize + k) * inner + n;
+      let peak = -Infinity;
+      for (let k = 0; k < axisSize; k++)
+        peak = Math.max(peak, Number(x[at(k)]));
+      let sum = 0;
+      for (let k = 0; k < axisSize; k++)
+        sum += Math.exp(Number(x[at(k)]) - peak);
+      for (let k = 0; k < axisSize; k++)
+        out[at(k)] = log
+          ? Number(x[at(k)]) - peak - Math.log(sum)
+          : Math.exp(Number(x[at(k)]) - peak) / sum;
+    }
+  return out;
+}
+
 /** The gradient of a softmax or a log softmax from its output `y` and the gradient `dy` of it. */
 export function softmaxGradReference(y, dy, shape, axis, log = false) {
   const { outer, axisSize, inner } = axisLayout(shape, axis);
