@@ -16,7 +16,7 @@ function laneValue(word: u32, index: u32, perWord: u32, width: u32): u32 {
 }
 
 /**
- * The value of one sample feature, normalised as `(value - mean) / std`. `word` is the word that
+ * The value of one sample feature, normalised as `(value - center) / spread`. `word` is the word that
  * holds element `index`; a float source (`isFloat` 1) reads the bits of that word as f32.
  */
 function featureValue(
@@ -25,12 +25,12 @@ function featureValue(
   perWord: u32,
   width: u32,
   isFloat: u32,
-  mean: f32,
-  std: f32,
+  center: f32,
+  spread: f32,
 ): f32 {
   const element = laneValue(word, index, perWord, width);
   const raw = select(f32(element), bitcast<f32>(word), isFloat === 1);
-  return (raw - mean) / std;
+  return (raw - center) / spread;
 }
 
 /**
@@ -42,8 +42,8 @@ export function gatherFirst(
   out: array<f32>,
   perm: array<u32>,
   words: array<u32>,
-  mean: array<f32>,
-  std: array<f32>,
+  center: array<f32>,
+  spread: array<f32>,
   start: u32,
   first: u32,
   rows: u32,
@@ -65,8 +65,8 @@ export function gatherFirst(
       perWord,
       width,
       isFloat,
-      mean[feature],
-      std[feature],
+      center[feature],
+      spread[feature],
     );
     out[i] = select(0.0, value, inShard);
   }
@@ -78,8 +78,8 @@ export function gatherNext(
   prev: array<f32>,
   perm: array<u32>,
   words: array<u32>,
-  mean: array<f32>,
-  std: array<f32>,
+  center: array<f32>,
+  spread: array<f32>,
   start: u32,
   first: u32,
   rows: u32,
@@ -101,8 +101,8 @@ export function gatherNext(
       perWord,
       width,
       isFloat,
-      mean[feature],
-      std[feature],
+      center[feature],
+      spread[feature],
     );
     out[i] = select(prev[i], value, inShard);
   }

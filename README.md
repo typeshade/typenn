@@ -528,6 +528,46 @@ the flush read 30 to 40 ms, because the device had not finished the work when th
 flushed rows are the ones above. The per-step traffic that this change removes is measured in the
 test `a training step reads back only the loss and uploads no parameter values`, on a fake device.
 
+## Device-resident datasets
+
+`device.dataset(options)` uploads a dataset once and builds each batch on the device. A training
+step uploads no sample bytes. The only upload is the order of an epoch: `shuffle(seed)` or
+`order(indices)` upload one permutation of `trainCount` u32 values (4 bytes per sample).
+
+```ts
+const data = device.dataset({
+  inputs: { kind: "images", features: 3072, shape: [32, 32, 3] }, // u8 pixels, scaled by 1/255
+  train: { count: 50000, x: trainPixels, y: trainLabels }, // Uint8Array, Uint8Array
+  test: { count: 10000, x: testPixels, y: testLabels },
+});
+data.shuffle(seed);
+for (const batch of data.batches(128)) {
+  const logits = model.forward(batch.input); // shape [size, 32, 32, 3]
+  const loss = new nn.CrossEntropyLoss().forward(logits, batch.labels); // device class ids
+  // ...
+}
+for (const batch of data.evaluation(256)) {
+  /* the test split, in order */
+}
+data.dispose();
+```
+
+The inputs are `images` (u8, scaled as `x / 255`), `tabular` (f32, normalised with `mean` and `std`;
+a zero std is read as 1) or `text` (token ids with `offsets`, a multi-hot bag over `vocab`). The
+labels are integer class ids (u8, u16 or u32, below 2^24), or f32 regression targets with an
+optional `target: { mean, std }`; a regression label has shape `[size, 1]`.
+
+The sources keep their dtype on the device, packed in u32 words: u8 four to a word, u16 two, f32
+as its bits. A source larger than `shardBytes` is split into shards, and each gather kernel call
+writes only the rows of its shard. The default `shardBytes` is the WebGPU device's
+`maxStorageBufferBindingSize` when the device reports it, and 134217728 (128 MiB, the WebGPU
+guaranteed value) otherwise. Pass `shardBytes` to set it.
+
+`dataset.residency` says where the batches are built. `{ tier: "device" }` means on the device.
+`{ tier: "host" }` means each batch is built on the host and uploaded, with a `reason`: on the
+WebGL2 tier, or when a sample does not fit a shard. `dataset.bytes` is the device memory the dataset
+holds. `dispose()` frees it, and a later use throws.
+
 ## Long-axis softmax and GPU performance
 
 A short softmax axis (fewer than 64 elements) uses a single kernel for each

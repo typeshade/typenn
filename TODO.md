@@ -317,19 +317,31 @@ the source for bounds and index calculations is open.
 
 ## Device-resident datasets
 
-Status: in progress (branch `claude/typenn-device-dataset`, based on `main` 11bdce1, TypeShade pin 96dbaa9).
+Status: implemented on `claude/typenn-device-dataset`, with open items below. The README section
+"Device-resident datasets" documents the API.
 
-Goal: upload a dataset to the device once, and build every training and evaluation batch on the
-device. A training step uploads no sample bytes and does no per-sample CPU work.
+Done:
 
-- [ ] Public API under the `nn` namespace: a dataset object for images, tabular, text
-      bag-of-words and labels (u8, u16, u32 and f32 regression targets).
-- [ ] Storage keeps the source dtype on the device: u8 packed 4 per u32 word, u16 2 per word.
-- [ ] Batches from a device-resident permutation, one N-element u32 upload per epoch.
-- [ ] Evaluation iterator over the test split in order.
-- [ ] CrossEntropyLoss and MSELoss accept a device label or target Tensor.
-- [ ] Sharding for sources above the storage binding limit (128 MiB default).
-- [ ] Residency report (`residency`) with a reason when a tier cannot hold a source.
-- [ ] `dispose()` and a `bytes` property, with a clear error after dispose.
-- [ ] Parity tests against the host batch helpers (CPU tier and fake GPU), and a GPU test.
-- [ ] README section and JSDoc on every export.
+- `device.dataset(options)` for images (u8), tabular (f32), text bag-of-words and labels (u8, u16,
+  u32 class ids; f32 regression targets with `target`). Sources keep their dtype, packed in u32.
+- Gather kernels in `src/kernels/dataset.shade.ts`: one call per shard, rows of other shards kept.
+- Shards of `shardBytes` (default `DEFAULT_SHARD_BYTES` = 134217728).
+- `CrossEntropyLoss` accepts a device class-id Tensor (`sparseSoftmaxCrossEntropyWithLogits`).
+- `residency` (device or host, with a reason), `bytes`, `dispose()`.
+- Parity tests on the CPU tier for every kind, shard boundaries, the last short batch, eval
+  order, loss and gradients, dispose and host residency: `tests/dataset.test.mjs`.
+
+Open:
+
+- [ ] The permutation is re-sent on plans of a step, on the fake WebGPU device: about 4 bytes per
+      sample per step (N=1200 gives 6456 bytes per step, N=12 gives 516). The test
+      "a step's upload bytes do not grow" is a TODO until this is fixed. The cause is not found.
+- [ ] The device storage limit is read from the GPUDevice's limits when present, else 128 MiB.
+      Not measured on a real GPU. When TypeShade reports the runtime limits (proposal 0051), the
+      read moves to that API at the TODO in `device-dataset.ts`.
+- [ ] WebGL2: the dataset falls back to host batching. No WebGL2 measurement.
+- [ ] Bag-of-words gathers scan each sample's tokens for each output element: cost is vocab times
+      tokens per row. Not measured on a real vocabulary.
+- [ ] Not measured on a real GPU: `npm run test:gpu` has no dataset case yet.
+- [ ] Text sources are not sharded: a text source above one shard falls back to host batching.
+- [ ] Labels above 2^24 are refused, since f32 holds them exactly only below that.
