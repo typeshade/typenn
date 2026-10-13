@@ -17,7 +17,7 @@ jobs:
   cloudflare:
     name: cloudflare
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 90
     environment:
       name: cloudflare
       url: https://typenn.typeshade.dev/
@@ -39,15 +39,31 @@ jobs:
           python-version: "3.12"
       - name: Install the dataset script's numpy
         run: pip install "numpy==2.*"
-      - name: Cache the dataset downloads
-        uses: actions/cache@v4
+      - name: Restore the dataset downloads
+        uses: actions/cache/restore@v4
         with:
           path: website/.dataset-cache
-          key: datasets-${{ hashFiles('website/scripts/fetch_datasets.py') }}
+          # A cache entry cannot be overwritten, so each run saves under its own key and the
+          # next run restores the newest entry by prefix. The key below never matches exactly.
+          key: datasets-${{ hashFiles('website/scripts/fetch_datasets.py') }}-${{ github.run_id }}
           # The script checks every file's SHA-256, so an older cache is safe to restore.
-          restore-keys: datasets-
+          restore-keys: |
+            datasets-${{ hashFiles('website/scripts/fetch_datasets.py') }}-
+            datasets-
       - name: Mirror the datasets under website/public/data
+        # The step ends before the job's timeout, so the save step below runs with a normal
+        # (failed) status and the full time it needs, not as a cancellation cleanup.
+        timeout-minutes: 70
         run: cd website && npm run datasets
+      # Saved even when the step above fails or times out, so a partial download (.part) carries
+      # over to the next run.
+      - name: Save the dataset downloads
+        if: always()
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: website/.dataset-cache
+          key: datasets-${{ hashFiles('website/scripts/fetch_datasets.py') }}-${{ github.run_id }}
       - name: Build the site
         run: cd website && npm ci && npm run build
       - name: Deploy website/dist
