@@ -402,37 +402,6 @@ The chain is faster after, in each round. Run `node scripts/bench-step.mjs --sce
 `--scenario chain` to repeat a row. `--dist <directory>` runs the script on the `dist` of another
 build.
 
-## Long-axis softmax and GPU performance
-
-A short softmax axis (fewer than 64 elements) uses a single kernel for each
-forward or gradient operation. Larger axes compute one normalization statistic
-per slice and then apply it to all elements, avoiding quadratic repeated
-normalization in the forward and backward passes. The crossover is provisional:
-two dispatches can be slower than one on a physical GPU for some shapes.
-
-The correctness tests use Chromium on **SwiftShader**, a software GPU. Do not
-treat their elapsed time as a hardware GPU benchmark. On a computer with a
-real GPU and a browser with native WebGPU support, run:
-
-```sh
-npm run build
-TYPESHADE_CHROMIUM=/path/to/chrome node scripts/bench-softmax.mjs --hardware
-```
-
-To measure the complete MNIST training step (forward, backward, Adam and
-readback) on native hardware rather than on SwiftShader:
-
-```sh
-TYPESHADE_CHROMIUM=/path/to/chrome node scripts/bench-step.mjs --scenario step --hardware
-```
-
-The benchmark refuses an identified software/fallback adapter under
-`--hardware`. It reports the adapter identity, operation, axis length,
-dispatch count and end-to-end readback-inclusive timings. To compare a
-previous build, point `--dist` to its compiled `dist` directory and run
-the same command with identical axis lengths. GPU timestamp measurements,
-hardware-tiled matmul and device-resident Adam updates are not implemented.
-
 ### Pool and read in the step
 
 Before is `origin/main` at commit `3a6ba27`, which reads the loss with `data()` before `backward()`.
@@ -520,6 +489,38 @@ short here. A hardware GPU is not measured in this table. An earlier measurement
 the flush read 30 to 40 ms, because the device had not finished the work when the clock stopped. The
 flushed rows are the ones above. The per-step traffic that this change removes is measured in the
 test `a training step reads back only the loss and uploads no parameter values`, on a fake device.
+
+## Long-axis softmax and GPU performance
+
+A short softmax axis (fewer than 64 elements) uses a single kernel for each
+forward or gradient operation. Larger axes compute the peak and the sum of
+exponentials of each slice once (`softmaxStatistics`) and then apply them to all
+elements, avoiding quadratic repeated normalization in the forward and backward
+passes. The gradient reduces each slice once in the same way. The crossover is provisional:
+two dispatches can be slower than one on a physical GPU for some shapes.
+
+The correctness tests use Chromium on **SwiftShader**, a software GPU. Do not
+treat their elapsed time as a hardware GPU benchmark. On a computer with a
+real GPU and a browser with native WebGPU support, run:
+
+```sh
+npm run build
+TYPESHADE_CHROMIUM=/path/to/chrome node scripts/bench-softmax.mjs --hardware
+```
+
+To measure the complete MNIST training step (forward, backward, Adam and
+readback) on native hardware rather than on SwiftShader:
+
+```sh
+TYPESHADE_CHROMIUM=/path/to/chrome node scripts/bench-step.mjs --scenario step --hardware
+```
+
+The benchmark refuses an identified software/fallback adapter under
+`--hardware`. It reports the adapter identity, operation, axis length,
+dispatch count and end-to-end readback-inclusive timings. To compare a
+previous build, point `--dist` to its compiled `dist` directory and run
+the same command with identical axis lengths. GPU timestamp measurements,
+hardware-tiled matmul and device-resident Adam updates are not implemented.
 
 ## Tests
 
