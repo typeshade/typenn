@@ -85,7 +85,6 @@ async function measure(arg) {
       for (const op of ["softmax", "logSoftmax"]) {
         for (const mode of ["forward", "forwardBackward"]) {
           const run = async () => {
-            const start = device.reports.length;
             const y = input[op]();
             if (mode === "forward") {
               await y.data();
@@ -95,16 +94,10 @@ async function measure(arg) {
               await dy.data();
               await dy.disposeGraph([input, upstream]);
             }
-            const newReports = device.reports.slice(start);
+            const report = device.lastReport;
             return {
-              dispatches: newReports.reduce(
-                (n, report) => n + report.dispatches,
-                0,
-              ),
-              submissions: newReports.reduce(
-                (n, report) => n + report.submissions,
-                0,
-              ),
+              dispatches: report?.dispatches ?? 0,
+              submissions: report?.submissions ?? 0,
             };
           };
           for (let k = 0; k < arg.warmup; k++) await run();
