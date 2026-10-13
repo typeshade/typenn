@@ -15,7 +15,7 @@ brand are not copied.
 - Current user flow: overview → get started → guides/API → Playground or source examples.
 
 Use current source, tests, README, and TODO as evidence. Distinguish TypeNN's Tensor graph from
-TypeShade Shader IR. A submitted Frame is not kernel fusion. Do not invent benchmark values,
+TypeShade Shader IR. Each `data()` runs as one TypeShade `fuse` scope; only WebGPU fuses an elementwise chain into one dispatch. Do not invent benchmark values,
 hardware details, generated compiler output, model results, or support guarantees.
 
 ## Stack
@@ -33,8 +33,8 @@ hardware details, generated compiler output, model results, or support guarantee
 
 - `/` and `/ko/`: product overview, real Tensor code, compiler/execution path, entry points.
 - `/guide/` and `/ko/guide/`: first operation and lifecycle.
-- `/guide/execution/` and `/ko/guide/execution/`: deferred graph, lowering boundary, backend
-  paths, and the distinction between Frame submission and fusion.
+- `/guide/execution/` and `/ko/guide/execution/`: deferred graph, kernel functions, the fuse scope of
+  each `data()`, backend tiers, and `device.lastReport`.
 - `/guide/training/` and `/ko/guide/training/`: Module, autograd, optimizer, resource lifetime,
   and verified GPU-resident behavior.
 - `/api/` and `/ko/api/`: practical index of the current Device, Tensor, Module, and optimizer

@@ -41,10 +41,10 @@ await device.dispose();`;
       </div>
       <div class="path-strip">
         <article><span class="path-index">01</span><h3>Define</h3><p>Tensor calls describe shapes and operations. TypeNN records them as graph nodes.</p><code>tensor.matmul(weight).relu()</code></article>
-        <article><span class="path-index">02</span><h3>Lower</h3><p>TypeNN maps graph operations to its TypeShade kernel programs.</p><code>Tensor graph → kernel program</code></article>
-        <article><span class="path-index">03</span><h3>Run</h3><p>TypeShade dispatches the reachable work on the selected execution tier.</p><code>CPU · WebGPU · WebGL2*</code></article>
+        <article><span class="path-index">02</span><h3>Lower</h3><p>Each node holds a TypeShade kernel function that TypeNN calls on resident arrays.</p><code>Tensor graph → kernel functions</code></article>
+        <article><span class="path-index">03</span><h3>Run</h3><p>One fuse scope runs the reachable kernels on the selected execution tier.</p><code>CPU · WebGPU · WebGL2*</code></article>
       </div>
-      <p class="fine-print">* WebGL2 uses a constrained compute lowering path. A Frame can group dispatches; that does not mean the kernels are fused.</p>
+      <p class="fine-print">* WebGL2 and the CPU tier run the same kernel functions apart. Only WebGPU fuses an elementwise chain into one dispatch.</p>
     </section>
 
     <section class="home-learning" aria-labelledby="learn-title">
@@ -58,7 +58,7 @@ await device.dispose();`;
     </section>
 
     <section class="home-status" aria-labelledby="status-title">
-      <div><p class="eyebrow">Current implementation</p><h2 id="status-title">The framework is compiler-first. Its optimizer is still evolving.</h2><p>GPU training keeps gradients and Adam state resident and updates parameters through TypeShade kernels. Tensor graph operations still dispatch separately; graph-wide fusion and tiled MatMul remain future work.</p></div>
+      <div><p class="eyebrow">Current implementation</p><h2 id="status-title">Every op is a kernel function. Training is not tuned yet.</h2><p>Each <code>data()</code> runs as one TypeShade fuse scope, and <code>device.lastReport</code> shows its plan. Optimizers still update host arrays, so Adam is not a device kernel and tiled MatMul remains future work.</p></div>
       <a class="button button-quiet" href="https://github.com/typeshade/typenn/blob/main/TODO.md">Read implementation status <span aria-hidden="true">↗</span></a>
     </section>
   </div>

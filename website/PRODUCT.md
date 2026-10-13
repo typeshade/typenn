@@ -44,14 +44,14 @@ an install command that is not ready.
   activations, reductions, softmax, and logits-based softmax cross entropy.
 - `Module`, `Sequential`, `Linear`, `Flatten`, `ReLU`, `Dropout`, `CrossEntropyLoss`, `Adam`, and
   `SGD` cover the current example path.
-- GPU Module training keeps parameter and gradient data and Adam moments in Device-owned resident
-  buffers and records optimizer update kernels in the TypeShade Frame. CPU optimizer behavior
-  remains host-based. Explicit `Tensor.data()` calls are host reads.
+- Every operation is a TypeShade kernel function and every `data()` runs as one `fuse` scope.
+  Optimizers (SGD, Adam) update host arrays on every tier. Explicit `Tensor.data()` calls are host reads.
 - Tensor graph reverse-mode differentiation supports selected operations. TypeShade
   `shadeGrad`/`shadeGradCheck` are a distinct pure-function differentiation API.
 - One active TypeNN Device is supported per JavaScript context due to TypeShade's global call-layer
   configuration.
-- Tensor graph nodes still dispatch their own kernels. General graph fusion, workgroup-tiled
+- On WebGPU, the compiler fuses consecutive elementwise kernel calls of a `data()` into one
+  dispatch; WebGL2 and the CPU tier run the calls apart. Device-side Adam, workgroup-tiled
   MatMul, liveness-based buffer reuse, serialization, and WebNN are not implemented.
 - The browser demo ships TypeNN runtime JavaScript generated from a recorded source commit. Update
   it with `npm run sync:typenn` after building TypeNN.

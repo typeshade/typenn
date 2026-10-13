@@ -12,6 +12,8 @@ export interface Device {
     readonly name: "cpu" | "webgpu" | "webgl2";
     readonly fallbackReason?: string;
   };
+  /** The plan of the last data(): tier, dispatches, submissions and groups of calls. */
+  readonly lastReport?: { readonly tier: string; readonly dispatches: number; readonly submissions: number };
   tensor(values: ArrayLike<number>, options: { readonly shape: readonly number[] }): Tensor;
   dispose(): Promise<void>;
 }

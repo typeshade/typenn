@@ -41,10 +41,10 @@ await device.dispose();`;
       </div>
       <div class="path-strip">
         <article><span class="path-index">01</span><h3>정의</h3><p>Tensor 호출이 Shape와 연산을 표현합니다. TypeNN은 그래프 노드를 기록합니다.</p><code>tensor.matmul(weight).relu()</code></article>
-        <article><span class="path-index">02</span><h3>Lowering</h3><p>TypeNN이 그래프 연산을 TypeShade 커널 프로그램에 연결합니다.</p><code>Tensor graph → kernel program</code></article>
-        <article><span class="path-index">03</span><h3>실행</h3><p>TypeShade가 선택된 실행 계층에서 그래프에 필요한 작업을 디스패치합니다.</p><code>CPU · WebGPU · WebGL2*</code></article>
+        <article><span class="path-index">02</span><h3>연결</h3><p>노드마다 TypeShade 커널 함수가 있고, TypeNN이 Resident 배열에 대해 호출합니다.</p><code>Tensor graph → kernel functions</code></article>
+        <article><span class="path-index">03</span><h3>실행</h3><p>fuse 범위 하나가 선택된 실행 계층에서 필요한 커널을 실행합니다.</p><code>CPU · WebGPU · WebGL2*</code></article>
       </div>
-      <p class="fine-print">* WebGL2는 제한된 compute lowering 경로입니다. Frame에 디스패치를 모아도 커널이 퓨전되는 것은 아닙니다.</p>
+      <p class="fine-print">* WebGL2와 CPU 계층은 같은 커널 함수를 따로 실행합니다. elementwise 연쇄를 디스패치 하나로 퓨전하는 것은 WebGPU뿐입니다.</p>
     </section>
 
     <section class="home-learning" aria-labelledby="learn-title">
@@ -58,7 +58,7 @@ await device.dispose();`;
     </section>
 
     <section class="home-status" aria-labelledby="status-title">
-      <div><p class="eyebrow">현재 구현 상태</p><h2 id="status-title">컴파일러 우선 구조 위에서 옵티마이저를 개선하고 있습니다.</h2><p>GPU 학습에서는 기울기와 Adam 상태를 Resident로 유지하고 TypeShade 커널로 파라미터를 갱신합니다. Tensor 그래프 연산별 디스패치는 유지되며 그래프 퓨전과 타일 MatMul은 아직 구현되지 않았습니다.</p></div>
+      <div><p class="eyebrow">현재 구현 상태</p><h2 id="status-title">모든 연산이 커널 함수입니다. 학습은 아직 최적화 전입니다.</h2><p><code>data()</code> 호출마다 TypeShade fuse 범위 하나가 실행되고, <code>device.lastReport</code>가 그 계획을 보여 줍니다. 옵티마이저는 아직 호스트 배열을 갱신하므로 Adam은 장치 커널이 아니며 타일 MatMul은 앞으로의 과제입니다.</p></div>
       <a class="button button-quiet" href="https://github.com/typeshade/typenn/blob/main/TODO.md">구현 상태 보기 <span aria-hidden="true">↗</span></a>
     </section>
   </div>
