@@ -127,7 +127,8 @@ export class Device {
 
   /**
    * The last plan the executor ran, with the graph id of each kernel call in its scope
-   * (`nodes[k]` for the k-th call), or undefined before the first.
+   * (`nodes[k]` for the k-th call), or undefined before the first. A failed plan leaves
+   * `lastPlan`, `lastReport` and `reports` as they were.
    */
   get lastPlan(): DevicePlan | undefined {
     return this.plan;

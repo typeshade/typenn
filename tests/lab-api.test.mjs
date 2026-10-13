@@ -245,3 +245,189 @@ test("a 2-16-2 ReLU MLP with cross entropy solves XOR in 300 steps", async () =>
     assert.equal(await accuracy(), 1, "XOR accuracy after 300 steps");
   });
 });
+
+test("Conv2d output shape follows the padding and the strides", async () => {
+  await onCpu(async (device) => {
+    const x = device.tensor(new Float32Array(2 * 5 * 5 * 3).fill(1), {
+      shape: [2, 5, 5, 3],
+    });
+    const cases = [
+      [{ kernelSize: 3, padding: "valid" }, [2, 3, 3, 4]],
+      [{ kernelSize: 3, padding: "same" }, [2, 5, 5, 4]],
+      [{ kernelSize: 3, padding: "same", strides: 2 }, [2, 3, 3, 4]],
+      [{ kernelSize: [3, 3], strides: 2 }, [2, 2, 2, 4]],
+    ];
+    for (const [options, shape] of cases) {
+      const layer = new nn.Conv2d(3, 4, { ...options, seed: 1 }).to(device);
+      const output = layer.forward(x);
+      assert.deepEqual(output.shape, shape, JSON.stringify(options));
+      assert.equal(
+        (await output.data()).length,
+        shape.reduce((a, b) => a * b),
+      );
+    }
+  });
+});
+
+test("Conv2d adds its bias to every position of each output channel", async () => {
+  await onCpu(async (device) => {
+    const layer = new nn.Conv2d(1, 3, { kernelSize: 2 }).to(device);
+    layer.weight.fill(0);
+    layer.bias.set([1, -2, 0.5]);
+    const x = device.tensor(new Float32Array(1 * 3 * 3).fill(7), {
+      shape: [1, 3, 3, 1],
+    });
+    const output = await layer.forward(x).data();
+    const expected = Array.from({ length: 2 * 2 }, () => [1, -2, 0.5]).flat();
+    close(output, expected, 1e-6);
+    assert.equal(layer.parameters().length, 2);
+  });
+});
+
+test("Conv2d with bias false has one parameter", async () => {
+  await onCpu(async (device) => {
+    const layer = new nn.Conv2d(1, 2, { kernelSize: 2, bias: false }).to(
+      device,
+    );
+    assert.equal(layer.parameters().length, 1);
+    assert.equal(layer.parameters()[0].shape.join(","), "2,2,1,2");
+  });
+});
+
+test("Conv2d filter and bias gradients match central differences", async () => {
+  await onCpu(async (device) => {
+    const input = [0.5, -1, 0.25, 1.5, 0.75, -0.5, 0.3, -0.2, 1.1];
+    const coefficients = [1, -0.5, 0.25, 2, -1.5, 0.75, 0.5, -0.25];
+    const weights = [0.2, -0.3, 0.4, 0.1, -0.5, 0.6, 0.7, -0.8];
+    const biases = [0.05, -0.1];
+    // The objective is sum(c * tanh(conv(x, w) + b)), so it is not linear in the parameters.
+    const build = (w, b) => {
+      const layer = new nn.Conv2d(1, 2, { kernelSize: 2 }).to(device);
+      layer.weight.set(w);
+      layer.bias.set(b);
+      const x = device.tensor(input, { shape: [1, 3, 3, 1] });
+      const c = device.tensor(coefficients, { shape: [1, 2, 2, 2] });
+      const objective = layer.forward(x).tanh().mul(c).sum();
+      return { layer, objective };
+    };
+    const { layer, objective } = build(weights, biases);
+    await objective.backward();
+    const [weight, bias] = layer.parameters();
+    const analytic = [
+      ...(await weight.grad.data()),
+      ...(await bias.grad.data()),
+    ];
+    const value = async (w, b) => {
+      const { objective: f } = build(w, b);
+      return (await f.data())[0];
+    };
+    const h = 1e-3;
+    const numeric = [];
+    for (let i = 0; i < weights.length; i++) {
+      const plus = weights.map((v, j) => (j === i ? v + h : v));
+      const minus = weights.map((v, j) => (j === i ? v - h : v));
+      numeric.push(
+        ((await value(plus, biases)) - (await value(minus, biases))) / (2 * h),
+      );
+    }
+    for (let i = 0; i < biases.length; i++) {
+      const plus = biases.map((v, j) => (j === i ? v + h : v));
+      const minus = biases.map((v, j) => (j === i ? v - h : v));
+      numeric.push(
+        ((await value(weights, plus)) - (await value(weights, minus))) /
+          (2 * h),
+      );
+    }
+    close(analytic, numeric, 1e-3);
+  });
+});
+
+test("a Conv2d, ReLU, MaxPool2d, Flatten and Linear CNN learns bar orientation in 150 Adam steps", async () => {
+  await onCpu(async (device) => {
+    // A deterministic generator: each image has one full horizontal or vertical bar, at a random
+    // row or column, with a little noise. Class 0 is horizontal, class 1 is vertical.
+    const bars = (count, seed) => {
+      let state = seed >>> 0;
+      const next = () => {
+        state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+        return state / 0x100000000;
+      };
+      const pixels = new Float32Array(count * 64);
+      const labels = [];
+      for (let n = 0; n < count; n++) {
+        const label = next() < 0.5 ? 0 : 1;
+        const offset = Math.floor(next() * 8);
+        labels.push(label);
+        for (let k = 0; k < 8; k++) {
+          const row = label === 0 ? offset : k;
+          const column = label === 0 ? k : offset;
+          pixels[n * 64 + row * 8 + column] = 1;
+        }
+        for (let i = 0; i < 64; i++) pixels[n * 64 + i] += (next() - 0.5) * 0.2;
+      }
+      return { pixels, labels };
+    };
+    const train = bars(64, 1);
+    const test = bars(128, 2);
+    const model = new nn.Sequential(
+      new nn.Conv2d(1, 4, { kernelSize: 3, seed: 21 }),
+      new nn.ReLU(),
+      new nn.MaxPool2d({ filterSize: 2, strides: 2 }),
+      new nn.Flatten(),
+      new nn.Linear(36, 2, { seed: 22, weightScale: 0.2 }),
+    ).to(device);
+    const optimizer = nn.optim.Adam(model.parameters(), { lr: 0.01 });
+    const criterion = new nn.CrossEntropyLoss();
+    const accuracy = async ({ pixels, labels }) => {
+      const count = labels.length;
+      const output = model.forward(
+        device.tensor(pixels, { shape: [count, 8, 8, 1] }),
+      );
+      const logits = await output.data();
+      await output.disposeGraph(model.parameters());
+      let correct = 0;
+      for (let row = 0; row < count; row++) {
+        const predicted = logits[2 * row + 1] > logits[2 * row] ? 1 : 0;
+        if (predicted === labels[row]) correct++;
+      }
+      return correct / count;
+    };
+    for (let step = 0; step < 150; step++) {
+      await optimizer.zeroGrad();
+      const input = device.tensor(train.pixels, { shape: [64, 8, 8, 1] });
+      const loss = criterion.forward(model.forward(input), train.labels);
+      await loss.backward();
+      await optimizer.step();
+      await loss.disposeGraph(model.parameters());
+    }
+    const held = await accuracy(test);
+    assert.ok(held >= 0.95, `held-out accuracy after 150 steps is ${held}`);
+  });
+});
+
+test("MaxPool2d and AvgPool2d default strides to filterSize", async () => {
+  await onCpu(async (device) => {
+    const input = device.tensor(
+      new Float32Array(16).map((_, i) => i),
+      {
+        shape: [1, 4, 4, 1],
+      },
+    );
+    assert.deepEqual(
+      new nn.MaxPool2d({ filterSize: 2 }).forward(input).shape,
+      [1, 2, 2, 1],
+    );
+    assert.deepEqual(
+      new nn.AvgPool2d({ filterSize: 2 }).forward(input).shape,
+      [1, 2, 2, 1],
+    );
+    assert.deepEqual(
+      new nn.MaxPool2d({ filterSize: 2, strides: 1 }).forward(input).shape,
+      [1, 3, 3, 1],
+    );
+    const values = await new nn.MaxPool2d({ filterSize: 2 })
+      .forward(input)
+      .data();
+    assert.deepEqual([...values], [5, 7, 13, 15]);
+  });
+});

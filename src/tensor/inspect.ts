@@ -15,8 +15,9 @@ export interface GraphNode {
   /** True for a trainable parameter (`requiresGrad`). */
   readonly parameter: boolean;
   /**
-   * True when the tensor already holds an array. An input tensor always does. An operation
-   * holds one after a plan computed it, so a later `data()` does not run it.
+   * True when the tensor already holds an array. An input tensor always does, so `computed` is
+   * true for every input Tensor. An operation holds one after a plan computed it, so a later
+   * `data()` does not run it.
    */
   readonly computed: boolean;
 }
