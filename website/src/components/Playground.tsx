@@ -2,7 +2,8 @@ import { Button, ConfigProvider, Input, Select, theme as antdTheme } from "antd"
 import Prism from "prismjs";
 import "prismjs/components/prism-typescript";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Device, Tensor } from "../vendor/typenn/index.js";
+import type { DevicePlan, Device, GraphSnapshot, Tensor } from "../vendor/typenn/index.js";
+import KernelGraph from "./KernelGraph";
 
 type DevicePreference = "auto" | "cpu" | "webgpu" | "webgl2";
 type Operation = "matmul" | "add" | "matmul-relu";
@@ -39,6 +40,9 @@ const text = {
     errorTitle: "Execution failed",
     errorHelp: "Try CPU, check the matrix values, or select a backend available in this browser.",
     readback: "The result is read by an explicit data() call. Intermediate tensors are disposed after the read.",
+    graphTitle: "Kernel graph of this read",
+    graphNote: "A fused group is calls that TypeNN runs as one dispatch. A dispatch is one GPU call. On WebGPU, ReLU(A × B) fuses into one dispatch. On CPU, each call is its own group.",
+    graphReadme: "How a read runs, on GitHub",
     software: "Browser support varies. A software renderer is not a physical GPU benchmark.",
     shapeError: "Enter four finite numbers for each matrix.",
   },
@@ -68,6 +72,9 @@ const text = {
     errorTitle: "실행하지 못했습니다",
     errorHelp: "CPU를 시도하거나 행렬 값을 확인하고, 브라우저에서 사용할 수 있는 백엔드를 선택하세요.",
     readback: "명시적인 data() 호출로 결과를 읽습니다. 읽기가 끝나면 중간 Tensor를 해제합니다.",
+    graphTitle: "이 read의 커널 그래프",
+    graphNote: "융합된 그룹은 TypeNN이 한 번의 디스패치로 실행하는 호출 묶음입니다. 디스패치는 GPU 호출 한 번입니다. WebGPU에서 ReLU(A × B)는 디스패치 한 번으로 융합됩니다. CPU에서는 호출마다 그룹이 하나씩 생깁니다.",
+    graphReadme: "read 실행 방식 (GitHub)",
     software: "브라우저 지원은 환경마다 다릅니다. 소프트웨어 렌더러 결과는 물리 GPU 벤치마크가 아닙니다.",
     shapeError: "각 행렬에 유한한 숫자 네 개를 입력하세요.",
   },
@@ -84,6 +91,7 @@ export default function Playground({ locale }: { locale: "en" | "ko" }) {
   const [activeBackend, setActiveBackend] = useState<Device["backend"]["name"] | null>(null);
   const [fallback, setFallback] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [graph, setGraph] = useState<{ snapshot: GraphSnapshot; plan: DevicePlan | undefined } | null>(null);
   const [dark, setDark] = useState(false);
   const deviceEntry = useRef<DeviceEntry | null>(null);
 
@@ -99,6 +107,7 @@ export default function Playground({ locale }: { locale: "en" | "ko" }) {
     setError(null);
     setActiveBackend(null);
     setFallback(null);
+    setGraph(null);
   }
 
   useEffect(() => () => {
@@ -125,6 +134,7 @@ export default function Playground({ locale }: { locale: "en" | "ko" }) {
     setRunning(true);
     setError(null);
     setResult(null);
+    setGraph(null);
     let inputA: Tensor | undefined;
     let inputB: Tensor | undefined;
     let output: Tensor | undefined;
@@ -150,7 +160,9 @@ export default function Playground({ locale }: { locale: "en" | "ko" }) {
         output = operation === "matmul-relu" ? product.relu() : product;
       }
       if (!output) throw new Error("The selected operation did not produce an output Tensor.");
+      const snapshot = runtime.graph(output);
       const values = await output.data();
+      setGraph({ snapshot, plan: device.lastPlan });
       setResult(Array.from(values));
       setActiveBackend(device.backend.name);
       setFallback(device.backend.fallbackReason ?? null);
@@ -219,6 +231,16 @@ export default function Playground({ locale }: { locale: "en" | "ko" }) {
               <div className="result-error" role="alert"><strong>{words.errorTitle}</strong><code>{error}</code><p>{words.errorHelp}</p></div>
             ) : <div className="result-empty"><span className="empty-mark" aria-hidden="true">[ ]</span><p>{words.waiting}</p></div>}
             <p className="readback-note">{words.readback}</p>
+            {graph && (
+              <div className="playground-graph">
+                <span className="eyebrow">{words.graphTitle}</span>
+                <KernelGraph snapshot={graph.snapshot} plan={graph.plan} locale={locale} label={words.graphTitle} compact />
+                <p className="field-help">
+                  {words.graphNote}{" "}
+                  <a className="text-link" href="https://github.com/typeshade/typenn#how-a-read-runs">{words.graphReadme} ↗</a>
+                </p>
+              </div>
+            )}
           </div>
         </div>
 

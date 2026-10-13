@@ -17,6 +17,7 @@ import {
 } from "react";
 import {
   isCached,
+  labels,
   listDatasets,
   loadDataset,
   loadManifest,
@@ -24,9 +25,12 @@ import {
   type LoadedDataset,
   type Manifest,
 } from "../lab/datasets";
+import KernelGraph from "./KernelGraph";
 import { encode, bagOf, wordIndex } from "../lab/text";
 import {
   buildModel,
+  fillInputs,
+  inputSize,
   predict,
   presetsFor,
   specFor,
@@ -42,10 +46,20 @@ import {
   type NN,
   type Device,
 } from "../lab/train";
-import type { GraphSnapshot, Module } from "../vendor/typenn/index.js";
+import type {
+  DevicePlan,
+  GraphSnapshot,
+  Module,
+} from "../vendor/typenn/index.js";
 
 type Locale = "en" | "ko";
 type Words = Record<string, any>;
+type GraphKind = "forward" | "step";
+interface GraphTab {
+  readonly title: string;
+  readonly snapshot: GraphSnapshot | null;
+  readonly plan: DevicePlan | undefined;
+}
 
 const text: { en: Record<string, any>; ko: Record<string, any> } = {
   en: {
@@ -132,8 +146,21 @@ const text: { en: Record<string, any>; ko: Record<string, any> } = {
     emptyMetric: "The test metric appears after the first epoch.",
     slowCpu:
       "The CPU tier is slow for this model: about 2 s per step for the text model and about 4 s per step for the CNN, measured on one machine. Choose Auto on a browser with WebGPU.",
-    graphNote:
-      "The kernel graph of the last step is kept in this page. Its view comes in a later change.",
+    graphTitle: "Kernel graph",
+    graphIntro:
+      "The graph shows how TypeNN runs one read: each box is a tensor, and each group is a set of calls that one dispatch runs on WebGPU. A fused group is one dispatch. A dispatch is one GPU call.",
+    graphReadme: "How a read runs, on GitHub",
+    graphForward: "Forward of one batch",
+    graphStep: "One training step (forward + loss + backward)",
+    graphFresh: "A new, untrained model with the selected preset.",
+    graphTrained: "The trained model of this page.",
+    graphEmpty: "Choose a button to draw the graph of a read.",
+    graphStepNote:
+      "A training step can run more than one plan. Plan 1 holds the forward pass and the loss, read by data(). Plan 2 holds the gradients, if backward() runs a read of its own. Plan 2 has no graph view. Its groups are listed.",
+    graphTab1: "Plan 1: loss",
+    graphTab2: "Plan 2: gradients",
+    graphForwardTab: "Plan: forward",
+    graphError: "The graph could not be drawn.",
     running: "A run is in progress.",
     selectDataset: "Select a dataset.",
     unit: "USD",
@@ -223,8 +250,21 @@ const text: { en: Record<string, any>; ko: Record<string, any> } = {
     emptyMetric: "첫 에포크가 끝나면 테스트 지표가 나타납니다.",
     slowCpu:
       "이 모델은 CPU 계층에서 느립니다. 한 대의 기기에서 측정한 결과, 텍스트 모델은 한 스텝에 약 2초, CNN은 약 4초가 걸렸습니다. WebGPU를 지원하는 브라우저에서는 자동을 선택하세요.",
-    graphNote:
-      "마지막 단계의 커널 그래프는 이 페이지에 보관됩니다. 보기는 이후 변경에서 제공합니다.",
+    graphTitle: "커널 그래프",
+    graphIntro:
+      "그래프는 TypeNN이 read 한 번을 실행하는 방식을 보여 줍니다. 상자 하나는 Tensor 하나이고, 그룹 하나는 WebGPU에서 디스패치 한 번으로 실행하는 호출 묶음입니다. 융합된 그룹은 디스패치 한 번입니다. 디스패치는 GPU 호출 한 번입니다.",
+    graphReadme: "read 실행 방식 (GitHub)",
+    graphForward: "배치 하나의 순방향",
+    graphStep: "학습 한 단계 (순방향 + 손실 + 역방향)",
+    graphFresh: "선택한 모델 구조로 새로 만든, 학습하지 않은 모델입니다.",
+    graphTrained: "이 페이지에서 학습한 모델입니다.",
+    graphEmpty: "버튼을 누르면 read의 그래프를 그립니다.",
+    graphStepNote:
+      "학습 한 단계는 계획을 둘 이상 실행할 수 있습니다. 계획 1은 data()가 읽는 순방향과 손실을 담습니다. 계획 2는 backward()가 자체 읽기를 실행하면 기울기를 담습니다. 계획 2에는 그래프 보기가 없고 그룹만 나열합니다.",
+    graphTab1: "계획 1: 손실",
+    graphTab2: "계획 2: 기울기",
+    graphForwardTab: "계획: 순방향",
+    graphError: "그래프를 그리지 못했습니다.",
     running: "실행이 진행 중입니다.",
     selectDataset: "데이터셋을 고르세요.",
     unit: "USD",
@@ -347,7 +387,12 @@ export default function Lab({ locale }: { locale: Locale }) {
   const [progress, setProgress] = useState<Progress | null>(null);
   const [losses, setLosses] = useState<number[]>([]);
   const [metrics, setMetrics] = useState<number[]>([]);
-  const [lastGraph, setLastGraph] = useState<GraphSnapshot | null>(null);
+  const [graphTabs, setGraphTabs] = useState<GraphTab[]>([]);
+  const [graphTab, setGraphTab] = useState(0);
+  const [graphBusy, setGraphBusy] = useState<GraphKind | null>(null);
+  const [graphSource, setGraphSource] = useState<string | null>(null);
+  const [graphKind, setGraphKind] = useState<GraphKind | null>(null);
+  const [graphError, setGraphError] = useState<string | null>(null);
   const [results, setResults] = useState<RunResult[]>([]);
   const [runError, setRunError] = useState<string | null>(null);
   const [session, setSession] = useState<Session | null>(null);
@@ -494,7 +539,6 @@ export default function Lab({ locale }: { locale: Locale }) {
           const done = (info.epoch - 1) * info.stepsPerEpoch + info.step;
           setProgress({ ...info, totalSteps, done, epochs: config.epochs });
           setLosses((values) => [...values, info.loss]);
-          setLastGraph(info.graph);
         },
         onEpoch: (info) => setMetrics((values) => [...values, info.testMetric]),
       });
@@ -526,6 +570,112 @@ export default function Lab({ locale }: { locale: Locale }) {
     }
   }
   runRef.current = runTraining;
+
+  /**
+   * Draw the graph of one read. The forward reads the logits of one batch. The step reads the loss,
+   * then runs backward(), and keeps the plan of each read. A trained model of this page is used
+   * when its dataset is selected; otherwise a fresh model is built and disposed afterwards.
+   */
+  async function captureGraph(kind: GraphKind) {
+    if (runningRef.current || graphBusy) return;
+    setGraphBusy(kind);
+    setGraphError(null);
+    let fresh: Device | undefined;
+    try {
+      const nn = await NN_PROMISE();
+      const data = await ensureData(selected);
+      const current = sessionRef.current;
+      const trained = current !== null && current.data.info.id === selected;
+      const config = form.dataset === selected ? form : defaultConfig(selected);
+      let model: Module;
+      let device: Device;
+      let spec: ModelSpec;
+      if (current && trained) {
+        model = current.model;
+        device = current.device;
+        spec = current.spec;
+      } else {
+        spec = specFor(data, config);
+        fresh = await nn.device({ device: config.tier });
+        device = fresh;
+        model = buildModel(spec, nn).to(device);
+      }
+      const parameters = model.parameters();
+      const wasTraining = model.isTraining();
+      const n = Math.min(config.batchSize, data.train.count);
+      const indices = Uint32Array.from({ length: n }, (_, i) => i);
+      const size = inputSize(spec);
+      const batch = fillInputs(
+        data.train,
+        indices,
+        spec,
+        new Float32Array(n * size),
+      );
+      const input = device.tensor(batch.subarray(0, n * size), {
+        shape: [n, ...spec.inputShape],
+      });
+      const source = trained ? t.graphTrained : t.graphFresh;
+      try {
+        if (kind === "forward") {
+          model.eval();
+          const logits = model.forward(input);
+          const snapshot = nn.graph(logits);
+          await logits.data();
+          const plan = device.lastPlan;
+          await logits.disposeGraph(parameters);
+          setGraphTabs([{ title: t.graphForwardTab, snapshot, plan }]);
+        } else {
+          model.train();
+          const logits = model.forward(input);
+          const loss =
+            spec.preset === "regression"
+              ? (() => {
+                  const scale = targetScale(data.train);
+                  return new nn.MSELoss().forward(
+                    logits,
+                    Float32Array.from(
+                      indices,
+                      (i) => (data.train.y[i]! - scale.mean) / scale.std,
+                    ),
+                  );
+                })()
+              : new nn.CrossEntropyLoss().forward(
+                  logits,
+                  labels(data.train, indices),
+                );
+          const snapshot = nn.graph(loss);
+          await loss.data();
+          const forwardPlan = device.lastPlan;
+          await loss.backward();
+          const gradientPlan =
+            device.lastPlan !== forwardPlan ? device.lastPlan : undefined;
+          await loss.disposeGraph(parameters);
+          const tabs: GraphTab[] = [
+            { title: t.graphTab1, snapshot, plan: forwardPlan },
+          ];
+          if (gradientPlan)
+            tabs.push({
+              title: t.graphTab2,
+              snapshot: null,
+              plan: gradientPlan,
+            });
+          setGraphTabs(tabs);
+        }
+        setGraphTab(0);
+        setGraphKind(kind);
+        setGraphSource(source);
+      } finally {
+        if (wasTraining) model.train();
+        else model.eval();
+      }
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      setGraphError(`${t.graphError} ${message}`);
+    } finally {
+      if (fresh) await fresh.dispose().catch(() => undefined);
+      setGraphBusy(null);
+    }
+  }
 
   function selectDataset(id: string) {
     if (running) return;
@@ -799,7 +949,70 @@ export default function Lab({ locale }: { locale: Locale }) {
               />
             </figure>
           </div>
-          {lastGraph && <p className="lab-note">{words.graphNote}</p>}
+        </section>
+
+        <section className="lab-section" aria-labelledby="lab-graph">
+          <h2 id="lab-graph">{words.graphTitle}</h2>
+          <p className="lab-note">
+            {words.graphIntro}{" "}
+            <a
+              className="text-link"
+              href="https://github.com/typeshade/typenn#how-a-read-runs"
+            >
+              {words.graphReadme} ↗
+            </a>
+          </p>
+          <div className="lab-card-actions">
+            <Button
+              onClick={() => void captureGraph("forward")}
+              disabled={running || graphBusy !== null}
+              loading={graphBusy === "forward"}
+            >
+              {words.graphForward}
+            </Button>
+            <Button
+              onClick={() => void captureGraph("step")}
+              disabled={running || graphBusy !== null}
+              loading={graphBusy === "step"}
+            >
+              {words.graphStep}
+            </Button>
+          </div>
+          {graphSource && <p className="lab-note">{graphSource}</p>}
+          {graphError && (
+            <p className="lab-error" role="alert">
+              {graphError}
+            </p>
+          )}
+          {graphTabs.length > 1 && (
+            <div className="kg-tabs" role="tablist">
+              {graphTabs.map((tab, index) => (
+                <button
+                  key={tab.title}
+                  type="button"
+                  role="tab"
+                  aria-selected={graphTab === index}
+                  onClick={() => setGraphTab(index)}
+                >
+                  {tab.title}
+                </button>
+              ))}
+            </div>
+          )}
+          {graphTabs[graphTab] ? (
+            <KernelGraph
+              key={`${graphTab}-${graphTabs[graphTab]!.title}`}
+              snapshot={graphTabs[graphTab]!.snapshot}
+              plan={graphTabs[graphTab]!.plan}
+              locale={locale}
+              label={`${words.graphTitle}: ${graphTabs[graphTab]!.title}`}
+            />
+          ) : (
+            <p className="lab-note">{words.graphEmpty}</p>
+          )}
+          {graphKind === "step" && (
+            <p className="lab-note">{words.graphStepNote}</p>
+          )}
         </section>
 
         <section className="lab-section" aria-labelledby="lab-results">

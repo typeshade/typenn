@@ -53,6 +53,14 @@
   --code-bg: #101828;
   --success: #389e0d;
   --danger: #cf1322;
+  --kg-0: #0072b2;
+  --kg-1: #d55e00;
+  --kg-2: #009e73;
+  --kg-3: #cc79a7;
+  --kg-4: #b07b00;
+  --kg-5: #3d8fd1;
+  --kg-6: #6f4fa0;
+  --kg-7: #5d6b00;
 }
 
 :root[data-theme="dark"] {
@@ -67,6 +75,14 @@
   --code-bg: #080d18;
   --success: #73d13d;
   --danger: #ff7875;
+  --kg-0: #56b4e9;
+  --kg-1: #ff9f6b;
+  --kg-2: #4dd2a6;
+  --kg-3: #ec9fcb;
+  --kg-4: #f2c24f;
+  --kg-5: #8fc6f2;
+  --kg-6: #b99ae0;
+  --kg-7: #d8d46a;
 }
 
 @theme inline {
@@ -455,4 +471,78 @@
   .lab-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .lab-charts, .lab-cards, .lab-features { grid-template-columns: minmax(0, 1fr); }
   .lab-run-bar { align-items: stretch; }
+}
+
+/* Kernel graph view (src/components/KernelGraph.tsx). Colours are Okabe-Ito, tuned per theme. */
+.kg-panel { margin: 12px 0 0; min-width: 0; max-width: 100%; }
+.kg-summary { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12px; color: var(--muted); }
+.kg-summary b { color: var(--ink); font-weight: 600; }
+.kg-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 8px 0 6px; flex-wrap: wrap; }
+.kg-hint { font-size: 12px; color: var(--muted); }
+.kg-buttons { display: flex; gap: 4px; }
+.kg-buttons button { min-width: 32px; min-height: 32px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--ink); font: inherit; cursor: pointer; }
+.kg-buttons button:focus-visible, .kg-node:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.kg-viewport { position: relative; overflow: hidden; touch-action: none; cursor: grab; border: 1px solid var(--line); border-radius: 8px; background: var(--soft); max-width: 100%; }
+.kg-viewport:active { cursor: grabbing; }
+.kg-svg { display: block; }
+.kg-node rect { fill: var(--panel); stroke: var(--line); stroke-width: 1; }
+.kg-node text { font-family: var(--font-sans); fill: var(--ink); font-size: 12px; }
+.kg-node .kg-title { font-weight: 600; }
+.kg-node .kg-shape { fill: var(--muted); font-family: var(--font-mono); font-size: 11px; }
+.kg-node .kg-tag { fill: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; }
+.kg-input rect { fill: var(--soft); stroke: var(--muted); stroke-dasharray: 4 3; }
+.kg-idle { opacity: 0.55; }
+.kg-idle rect { stroke-dasharray: 2 3; }
+.kg-band { stroke: none; }
+.kg-badge circle { fill: var(--panel); stroke-width: 2; }
+.kg-badge text { font-size: 11px; font-weight: 700; fill: var(--ink); }
+.kg-edge polyline { stroke: var(--muted); }
+.kg-edge.kg-g0 polyline, .kg-g0 .kg-band, .kg-g0 .kg-badge circle, .kg-group-item.kg-g0 .kg-swatch { stroke: var(--kg-0); }
+.kg-g1 .kg-band, .kg-g1 .kg-badge circle, .kg-group-item.kg-g1 .kg-swatch { stroke: var(--kg-1); }
+.kg-g2 .kg-band, .kg-g2 .kg-badge circle, .kg-group-item.kg-g2 .kg-swatch { stroke: var(--kg-2); }
+.kg-g3 .kg-band, .kg-g3 .kg-badge circle, .kg-group-item.kg-g3 .kg-swatch { stroke: var(--kg-3); }
+.kg-g4 .kg-band, .kg-g4 .kg-badge circle, .kg-group-item.kg-g4 .kg-swatch { stroke: var(--kg-4); }
+.kg-g5 .kg-band, .kg-g5 .kg-badge circle, .kg-group-item.kg-g5 .kg-swatch { stroke: var(--kg-5); }
+.kg-g6 .kg-band, .kg-g6 .kg-badge circle, .kg-group-item.kg-g6 .kg-swatch { stroke: var(--kg-6); }
+.kg-g7 .kg-band, .kg-g7 .kg-badge circle, .kg-group-item.kg-g7 .kg-swatch { stroke: var(--kg-7); }
+.kg-g0 .kg-band { fill: var(--kg-0); }
+.kg-g1 .kg-band { fill: var(--kg-1); }
+.kg-g2 .kg-band { fill: var(--kg-2); }
+.kg-g3 .kg-band { fill: var(--kg-3); }
+.kg-g4 .kg-band { fill: var(--kg-4); }
+.kg-g5 .kg-band { fill: var(--kg-5); }
+.kg-g6 .kg-band { fill: var(--kg-6); }
+.kg-g7 .kg-band { fill: var(--kg-7); }
+.kg-op.kg-g0 rect:first-child { stroke: var(--kg-0); stroke-width: 2; }
+.kg-op.kg-g1 rect:first-child { stroke: var(--kg-1); stroke-width: 2; }
+.kg-op.kg-g2 rect:first-child { stroke: var(--kg-2); stroke-width: 2; }
+.kg-op.kg-g3 rect:first-child { stroke: var(--kg-3); stroke-width: 2; }
+.kg-op.kg-g4 rect:first-child { stroke: var(--kg-4); stroke-width: 2; }
+.kg-op.kg-g5 rect:first-child { stroke: var(--kg-5); stroke-width: 2; }
+.kg-op.kg-g6 rect:first-child { stroke: var(--kg-6); stroke-width: 2; }
+.kg-op.kg-g7 rect:first-child { stroke: var(--kg-7); stroke-width: 2; }
+.kg-badge circle { fill: var(--panel); }
+.kg-tooltip { position: absolute; z-index: 2; width: 220px; display: grid; gap: 3px; padding: 8px 10px; border-radius: 6px; background: var(--panel); border: 1px solid var(--line); color: var(--ink); font-size: 12px; line-height: 1.45; box-shadow: 0 4px 16px rgb(0 0 0 / 0.18); pointer-events: none; }
+.kg-tooltip strong { font-size: 13px; }
+.kg-tooltip span { color: var(--muted); overflow-wrap: anywhere; }
+.kg-legend, .kg-groups { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12px; color: var(--ink); }
+.kg-groups { flex-direction: column; }
+.kg-group-item { display: flex; align-items: flex-start; gap: 6px; }
+.kg-swatch { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; border: 2px solid currentColor; font-size: 11px; font-weight: 700; flex: none; }
+.kg-g0.kg-group-item .kg-swatch { border-color: var(--kg-0); }
+.kg-g1.kg-group-item .kg-swatch { border-color: var(--kg-1); }
+.kg-g2.kg-group-item .kg-swatch { border-color: var(--kg-2); }
+.kg-g3.kg-group-item .kg-swatch { border-color: var(--kg-3); }
+.kg-g4.kg-group-item .kg-swatch { border-color: var(--kg-4); }
+.kg-g5.kg-group-item .kg-swatch { border-color: var(--kg-5); }
+.kg-g6.kg-group-item .kg-swatch { border-color: var(--kg-6); }
+.kg-g7.kg-group-item .kg-swatch { border-color: var(--kg-7); }
+.kg-note { margin: 8px 0 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.kg-warn { color: var(--danger); }
+.kg-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 0; }
+.kg-tabs button { border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--ink); padding: 4px 10px; font: inherit; font-size: 12px; cursor: pointer; }
+.kg-tabs button[aria-selected="true"] { border-color: var(--brand); color: var(--brand); }
+@media (max-width: 560px) {
+  .kg-toolbar { flex-direction: column; align-items: flex-start; }
+  .kg-tooltip { width: 190px; }
 }

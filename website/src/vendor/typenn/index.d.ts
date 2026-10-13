@@ -36,6 +36,8 @@ export interface FuseReport {
   readonly groups: readonly {
     readonly calls: readonly string[];
     readonly fused: boolean;
+    /** Why the group stands apart from the group before it, in the author's words. */
+    readonly why?: string;
   }[];
 }
 
