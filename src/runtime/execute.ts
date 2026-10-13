@@ -9,10 +9,17 @@ import type { Tensor } from "../tensor/tensor.js";
 
 /** What the executor asks of the device that owns the arrays. */
 export interface Memory {
-  /** A resident array that holds a copy of `values`, freed with the device. */
+  /** A resident array that holds a copy of `values`, owned by the device until it is recycled. */
   keep(values: Float32Array): Resident<Float32Array>;
-  /** Free an array made by `keep`. */
+  /**
+   * A resident array of `length` values for a kernel to write. Its contents are whatever it held
+   * before: a kernel call writes every element of its output, so the device need not zero it.
+   */
+  output(length: number): Resident<Float32Array>;
+  /** Free an array made by `keep` or `output` now. */
   drop(array: Resident<Float32Array>): void;
+  /** Give back an array no Tensor holds. The device reuses it, or frees it. */
+  recycle(array: Resident<Float32Array>): void;
   /** Keep the report of a plan, and the graph id of each of its kernel calls, in call order. */
   record(report: FuseReport, nodes: readonly number[]): void;
 }
@@ -23,21 +30,25 @@ export interface Memory {
  * plan on the tier `configure({ prefer })` selects: on WebGPU one submission, with the calls the
  * compiler's facts allow in one dispatch. A tensor that already has an array is a leaf of the
  * scope. Every operation keeps its array, so a later read, and the gradient graph, find it.
+ *
+ * `reads` are the tensors whose values are returned. They are computed in the same plan as
+ * `roots`, so a read adds no plan when the plan computes it anyway. By default they are `roots`.
  */
 export async function execute(
   roots: readonly Tensor[],
   memory: Memory,
+  reads: readonly Tensor[] = roots,
 ): Promise<Float32Array[]> {
-  await compute(roots, memory);
-  return Promise.all(
-    roots.map(async (root) =>
-      // A tensor the caller made holds its values on the host; a device update may have left
-      // a newer value in its array, which one readback brings to the host first.
-      root.node.kind === "input"
-        ? (await root.hostValues()).slice()
-        : root.storage!.read(),
-    ),
-  );
+  await compute(reads === roots ? roots : [...roots, ...reads], memory);
+  return Promise.all(reads.map(readValues));
+}
+
+async function readValues(tensor: Tensor): Promise<Float32Array> {
+  // A tensor the caller made holds its values on the host; a device update may have left
+  // a newer value in its array, which one readback brings to the host first.
+  return tensor.node.kind === "input"
+    ? (await tensor.hostValues()).slice()
+    : tensor.storage!.read();
 }
 
 /** Compute the tensors under `roots` that have no array, as one plan. Nothing is read back. */
@@ -58,7 +69,7 @@ async function plan(pending: readonly Tensor[], memory: Memory): Promise<void> {
     for (const input of (tensor.node as OpNode).inputs)
       if (input.storage === undefined && input.node.kind === "input")
         input.storage = memory.keep(input.node.value);
-    tensor.storage = memory.keep(new Float32Array(sizeOf(tensor.shape)));
+    tensor.storage = memory.output(sizeOf(tensor.shape));
   }
   // The graph id of each kernel call of the scope, in call order. A scratch copy takes the id of
   // the operation that reads it.

@@ -28,8 +28,8 @@ export interface TrainResult {
 
 /**
  * Train the MLP of `model.ts` as PyTorch trains one: `zeroGrad()`, forward, loss, `backward()`,
- * `step()`. Every `data()` runs as one TypeShade fuse scope, so the report of the device says what
- * the plan of a step was.
+ * `step({ alsoRead: [loss] })`, which also returns the loss. The step runs as one TypeShade fuse
+ * scope, so the report of the device says what the plan of a step was.
  */
 export async function train(
   trainData: MNISTSplit,
@@ -63,9 +63,9 @@ export async function train(
         });
         const logits = model.forward(images);
         const loss = criterion.forward(logits, batch.labels);
-        const [batchLoss] = await loss.data();
         await loss.backward();
-        await optimizer.step();
+        // The step computes and reads the loss in its own plan: no plan of its own for the loss.
+        const [[batchLoss]] = await optimizer.step({ alsoRead: [loss] });
         lastReport = device.lastReport;
         losses.push(batchLoss!);
         totalLoss += batchLoss! * batch.size;

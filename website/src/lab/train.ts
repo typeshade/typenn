@@ -78,11 +78,7 @@ export interface StepInfo {
 }
 
 export interface Hooks {
-  onStep?: (
-    info: StepInfo & {
-      readonly graph: import("../vendor/typenn/index.js").GraphSnapshot;
-    },
-  ) => void;
+  onStep?: (info: StepInfo) => void;
   onEpoch?: (info: {
     readonly epoch: number;
     readonly testMetric: number;
@@ -314,10 +310,9 @@ export async function train(
             logits,
             labels(data.train, indices),
           );
-      const [value] = await loss.data();
       await loss.backward();
-      await optimizer.step();
-      const snapshot = nn.graph(loss);
+      // One plan updates the parameters and reads the loss; the loss is the value before the update.
+      const [[value]] = await optimizer.step({ alsoRead: [loss] });
       await loss.disposeGraph(parameters);
       const lossValue = value ?? Number.NaN;
       lossSum += lossValue * n;
@@ -334,7 +329,6 @@ export async function train(
         loss: lossValue,
         samplesPerSecond: samples / Math.max(elapsed, 1e-9),
         elapsedSeconds: elapsed,
-        graph: snapshot,
       });
       await YIELD();
       if (capped) break;

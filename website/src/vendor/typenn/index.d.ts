@@ -68,7 +68,13 @@ export interface Device {
 export type DevicePreference = "auto" | "cpu" | "webgpu" | "webgl2";
 
 export function device(
-  options?: { readonly device?: DevicePreference } | DevicePreference,
+  options?:
+    | {
+        readonly device?: DevicePreference;
+        /** The most bytes of released arrays kept for reuse. 0 turns the reuse off. Default 64 MiB. */
+        readonly poolBytes?: number;
+      }
+    | DevicePreference,
 ): Promise<Device>;
 
 export abstract class Module {
@@ -172,7 +178,13 @@ export class MSELoss {
 export interface Optimizer {
   readonly parameters: readonly Tensor[];
   zeroGrad(): Promise<void>;
-  step(): Promise<void>;
+  /**
+   * Update every parameter in one plan. The values of `alsoRead` are computed in that plan, from
+   * the parameters before the update, and returned in the order given.
+   */
+  step(options?: {
+    readonly alsoRead?: readonly Tensor[];
+  }): Promise<Float32Array[]>;
   /** Free the arrays the optimizer holds on the device besides the parameters. */
   dispose(): Promise<void>;
 }

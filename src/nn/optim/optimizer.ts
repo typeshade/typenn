@@ -1,5 +1,15 @@
 import type { Tensor } from "../../tensor/tensor.js";
 
+/** The options of `step()`. */
+export interface StepOptions {
+  /**
+   * Tensors to read back in the same plan as the update. Each is computed in that plan from the
+   * parameter values before the update, and read once after the plan. A loss that the step does
+   * not otherwise compute is computed there too, so reading it adds no plan.
+   */
+  readonly alsoRead?: readonly Tensor[];
+}
+
 export abstract class Optimizer {
   protected constructor(readonly parameters: readonly Tensor[]) {
     if (parameters.length === 0)
@@ -25,7 +35,28 @@ export abstract class Optimizer {
     );
   }
 
-  abstract step(): Promise<void>;
+  /**
+   * Update every parameter on the device, in one plan, and return the values of `alsoRead` in the
+   * order given. Nothing is read back except those values and the partials of a reduction. The
+   * step does not wait for the device to run the plan.
+   */
+  abstract step(options?: StepOptions): Promise<Float32Array[]>;
+
+  /** The `alsoRead` tensors of `options`, checked for this optimizer's device. */
+  protected readTensors(
+    options: StepOptions,
+    device: object,
+  ): readonly Tensor[] {
+    const alsoRead = options.alsoRead ?? [];
+    for (const tensor of alsoRead) {
+      tensor.assertUsable();
+      if (tensor.device !== device)
+        throw new TypeError(
+          "alsoRead tensors must share the optimizer's device.",
+        );
+    }
+    return alsoRead;
+  }
 
   /**
    * Free the arrays the optimizer holds on the device besides the parameters (the moments of

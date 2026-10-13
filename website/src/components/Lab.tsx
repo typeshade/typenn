@@ -175,7 +175,7 @@ const text: { en: Record<string, any>; ko: Record<string, any> } = {
     graphBatch:
       "Batch: {n} random samples of the test split (seed {seed}). Parameter checksum before and after: {sum}.",
     graphStepNote:
-      "A training step reads twice. Plan 1 reads the loss. backward() only records the gradient operations. Plan 2 reads all gradients in one plan, as optimizer.step() does. This view runs plan 2 but does not update the parameters.",
+      "A training run does one step in one plan: optimizer.step({ alsoRead: [loss] }) computes the loss, the gradients and the update together, and reads the loss. backward() only records the gradient operations. This view splits that work into two reads, so that each part has its own graph. Plan 1 reads the loss. Plan 2 reads all gradients in one plan. This view does not update the parameters.",
     graphTab1: "Plan 1: loss",
     graphTab2: "Plan 2: gradients",
     graphForwardTab: "Plan: forward",
@@ -289,7 +289,7 @@ const text: { en: Record<string, any>; ko: Record<string, any> } = {
     graphBatch:
       "배치: 테스트 분할에서 무작위로 고른 샘플 {n}개 (시드 {seed}). 전후 매개변수 체크섬: {sum}.",
     graphStepNote:
-      "학습 한 단계는 읽기를 두 번 합니다. 계획 1은 손실을 읽습니다. backward()는 기울기 연산을 기록만 합니다. 계획 2는 optimizer.step()처럼 모든 기울기를 한 계획으로 읽습니다. 이 화면은 계획 2를 실행하지만 매개변수는 바꾸지 않습니다.",
+      "학습 한 단계는 계획 하나로 실행합니다. optimizer.step({ alsoRead: [loss] })가 손실, 기울기, 매개변수 갱신을 함께 계산하고 손실을 읽습니다. backward()는 기울기 연산을 기록만 합니다. 이 화면은 같은 계산을 읽기 두 번으로 나눠, 부분마다 그래프를 보여 줍니다. 계획 1은 손실을 읽습니다. 계획 2는 모든 기울기를 한 계획으로 읽습니다. 이 화면은 매개변수를 바꾸지 않습니다.",
     graphTab1: "계획 1: 손실",
     graphTab2: "계획 2: 기울기",
     graphForwardTab: "계획: 순방향",
@@ -361,6 +361,8 @@ const DEFAULTS: Record<string, Omit<RunConfig, "dataset" | "tier" | "seed">> = {
 };
 
 const SEED = 1;
+/** The page state follows the training steps at most once in this many milliseconds. */
+const LOSS_FLUSH_MS = 100;
 
 export function defaultConfig(dataset: string): RunConfig {
   const base = DEFAULTS[dataset] ?? DEFAULTS.mnist!;
@@ -451,6 +453,11 @@ export default function Lab({ locale }: { locale: Locale }) {
   const memory = useRef(new Map<string, LoadedDataset>());
   const runningRef = useRef(false);
   const stopRef = useRef(false);
+  // The losses of the run, appended in O(1) at each step. The page state takes a copy at most
+  // once in LOSS_FLUSH_MS, so a step does not copy the array or render the page.
+  const lossBuffer = useRef<number[]>([]);
+  const latestProgress = useRef<Progress | null>(null);
+  const flushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sessionRef = useRef<Session | null>(null);
   const resultsRef = useRef<RunResult[]>([]);
   const runRef = useRef<(config: RunConfig) => Promise<RunResult>>(async () => {
@@ -565,6 +572,14 @@ export default function Lab({ locale }: { locale: Locale }) {
     }
   }
 
+  /** Move the steps buffered since the last flush into the page state: one render, not one per step. */
+  function flushSteps() {
+    if (flushTimer.current !== null) clearTimeout(flushTimer.current);
+    flushTimer.current = null;
+    setProgress(latestProgress.current);
+    setLosses(lossBuffer.current.slice());
+  }
+
   async function runTraining(config: RunConfig): Promise<RunResult> {
     if (runningRef.current) throw new Error(t.running);
     runningRef.current = true;
@@ -572,6 +587,8 @@ export default function Lab({ locale }: { locale: Locale }) {
     setStopping(false);
     setRunning(true);
     setRunError(null);
+    lossBuffer.current = [];
+    latestProgress.current = null;
     setLosses([]);
     setMetrics([]);
     setProgress(null);
@@ -601,8 +618,15 @@ export default function Lab({ locale }: { locale: Locale }) {
         onModel: (m) => (model = m),
         onStep: (info) => {
           const done = (info.epoch - 1) * info.stepsPerEpoch + info.step;
-          setProgress({ ...info, totalSteps, done, epochs: config.epochs });
-          setLosses((values) => [...values, info.loss]);
+          lossBuffer.current.push(info.loss);
+          latestProgress.current = {
+            ...info,
+            totalSteps,
+            done,
+            epochs: config.epochs,
+          };
+          if (flushTimer.current === null)
+            flushTimer.current = setTimeout(flushSteps, LOSS_FLUSH_MS);
         },
         onEpoch: (info) => setMetrics((values) => [...values, info.testMetric]),
       });
@@ -627,6 +651,8 @@ export default function Lab({ locale }: { locale: Locale }) {
       setRunError(message);
       throw cause;
     } finally {
+      // The steps of the last 100 ms reach the page before the run ends.
+      if (latestProgress.current !== null) flushSteps();
       if (device) await device.dispose().catch(() => undefined);
       runningRef.current = false;
       setRunning(false);
@@ -637,8 +663,9 @@ export default function Lab({ locale }: { locale: Locale }) {
 
   /**
    * Draw the graph of one read, on a seeded random batch of the test split. The forward reads the
-   * logits. The step reads the loss (plan 1), runs backward(), then reads all gradients in one
-   * plan (plan 2), as optimizer.step() does, but updates nothing. A trained model of this page is
+   * logits. The step view splits the work of one training step in two reads: it reads the loss
+   * (plan 1), runs backward(), then reads all gradients in one plan (plan 2). A real step runs
+   * both in the plan of optimizer.step({ alsoRead: [loss] }). The view updates nothing. A trained model of this page is
    * used when its dataset is selected, and its parameters stay bit-identical; otherwise a fresh
    * model is built and disposed afterwards.
    */
@@ -720,7 +747,7 @@ export default function Lab({ locale }: { locale: Locale }) {
           const snapshot = nn.graph(loss);
           await loss.data();
           const forwardPlan = device.lastPlan;
-          // backward() is lazy. optimizer.step() reads every gradient in one plan: plan 2.
+          // backward() is lazy. Plan 2 reads every gradient in one plan, as the plan of step() computes them.
           await loss.backward();
           const gradients = parameters.flatMap((p) => (p.grad ? [p.grad] : []));
           const gradientSnapshot = mergeSnapshots(gradients.map(nn.graph));

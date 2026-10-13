@@ -1,6 +1,6 @@
 import type { Tensor } from "../../tensor/tensor.js";
 import { sizeOf } from "../../tensor/shape.js";
-import { Optimizer } from "./optimizer.js";
+import { Optimizer, type StepOptions } from "./optimizer.js";
 import { adamFirstOf, adamSecondOf, adamUpdateOf } from "./update.js";
 
 export interface AdamOptions {
@@ -44,10 +44,12 @@ export class Adam extends Optimizer {
   /**
    * Update every parameter and both moments on the device, in one plan. The new moments and
    * parameters take the arrays the plan computed; no gradient is read back and no parameter is
-   * uploaded. The first step starts the moments at zero.
+   * uploaded. The first step starts the moments at zero. The values of `options.alsoRead` are
+   * returned, read in the same plan.
    */
-  async step(): Promise<void> {
+  async step(options: StepOptions = {}): Promise<Float32Array[]> {
     const device = this.parameters[0]!.device;
+    const alsoRead = this.readTensors(options, device);
     const gradients = this.gradientTensors();
     const iteration = this.iteration + 1;
     const firstCorrection = 1 - this.beta1 ** iteration;
@@ -69,7 +71,15 @@ export class Adam extends Optimizer {
         this.epsilon,
       ]),
     );
-    await device.computeAll([...updates, ...firsts, ...seconds]);
+    const computed = [...updates, ...firsts, ...seconds];
+    let values: Float32Array[];
+    try {
+      values = await device.computeAll(computed, alsoRead);
+    } catch (error) {
+      // A plan or a read that failed leaves the parameters and the moments as they were.
+      for (const tensor of computed) device.release(tensor);
+      throw error;
+    }
     // The plan is complete: the results replace the arrays they were computed from.
     try {
       this.parameters.forEach((parameter, index) => {
@@ -79,10 +89,10 @@ export class Adam extends Optimizer {
       });
     } finally {
       // An adoption that failed (a disposed parameter) leaves no computed array behind.
-      for (const tensor of [...updates, ...firsts, ...seconds])
-        device.release(tensor);
+      for (const tensor of computed) device.release(tensor);
     }
     this.iteration = iteration;
+    return values;
   }
 
   override async dispose(): Promise<void> {
