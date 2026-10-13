@@ -11,6 +11,8 @@ export interface DatasetInfo {
   task: Task;
   totalBytes: number;
   manifest: string;
+  /** "keras": downloaded from the Keras storage (keras.ts). "mirror": served from this site. */
+  origin: "keras" | "mirror";
 }
 
 export interface PartRef {
@@ -68,6 +70,8 @@ export interface LoadedDataset {
   manifest: Manifest;
   train: LoadedSplit;
   test: LoadedSplit;
+  /** The word of each token id, for the text datasets loaded from the Keras storage. */
+  vocabulary?: string[];
 }
 
 export interface LoadOptions {
@@ -83,7 +87,8 @@ export async function listDatasets(
 ): Promise<DatasetInfo[]> {
   const response = await fetch("/data/index.json", { signal });
   if (!response.ok) throw new Error(`index.json: HTTP ${response.status}`);
-  return (await response.json()) as DatasetInfo[];
+  const entries = (await response.json()) as Omit<DatasetInfo, "origin">[];
+  return entries.map((entry) => ({ ...entry, origin: "mirror" as const }));
 }
 
 export async function loadDataset(
@@ -135,7 +140,7 @@ export async function loadDataset(
   return { info, manifest, train, test };
 }
 
-/** The manifest of one dataset, without its parts. Small: used for the cards. */
+/** The manifest of one mirrored dataset, without its parts. Small: used for the cards. */
 export async function loadManifest(
   id: string,
   signal?: AbortSignal,

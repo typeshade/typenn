@@ -24,6 +24,13 @@ import {
   type LoadedDataset,
   type Manifest,
 } from "../lab/datasets";
+import {
+  isKerasDataset,
+  kerasCached,
+  kerasCardManifest,
+  kerasDatasetInfos,
+  loadKerasDataset,
+} from "../lab/keras";
 import { encode, bagOf, wordIndex } from "../lab/text";
 import {
   buildModel,
@@ -50,17 +57,21 @@ type Words = Record<string, any>;
 const text: { en: Record<string, any>; ko: Record<string, any> } = {
   en: {
     intro:
-      "Train a TypeNN model in this page, on the full training split of a real dataset. The data is the Keras datasets. The sources do not allow cross-origin downloads, so this site mirrors them. Each card names the citation and the license of its dataset.",
+      "Train a TypeNN model in this page, on the full training split of a real dataset. Five datasets download directly from the Keras dataset storage. CIFAR-10 and CIFAR-100 are mirrored on this site, because their source does not allow cross-origin downloads. Each card names the citation and the license of its dataset.",
     datasetTitle: "1. Dataset",
     download: "Download",
     downloading: "Downloading",
     loaded: "Loaded in this page",
+    fromKeras: "Downloaded from the Keras dataset storage.",
+    fromMirror:
+      "Mirrored on this site from cs.toronto.edu (no cross-origin access).",
     cachedNote: "Cached in this browser. No download is needed.",
     notCached: "Not cached yet. The first download fetches the files.",
     bytes: "Size",
     counts: "Train / test",
     license: "License",
     citation: "Citation",
+    source: "Source",
     modelTitle: "2. Model and training",
     preset: "Model",
     mlp: "MLP: Flatten, Linear, ReLU, Dropout, Linear",
@@ -141,17 +152,21 @@ const text: { en: Record<string, any>; ko: Record<string, any> } = {
   },
   ko: {
     intro:
-      "이 페이지에서 실제 데이터셋의 학습 데이터 전체로 TypeNN 모델을 학습합니다. 데이터는 Keras 데이터셋입니다. 원본 서버가 브라우저의 직접 내려받기(CORS)를 허용하지 않아 이 사이트가 사본을 제공합니다. 각 카드에 데이터셋의 출처와 라이선스를 표시합니다.",
+      "이 페이지에서 실제 데이터셋의 학습 데이터 전체로 TypeNN 모델을 학습합니다. 다섯 개 데이터셋은 Keras 데이터셋 저장소에서 직접 내려받습니다. CIFAR-10과 CIFAR-100은 원본 서버가 브라우저의 직접 내려받기(CORS)를 허용하지 않아 이 사이트에 사본을 둡니다. 각 카드에 데이터셋의 출처와 라이선스를 표시합니다.",
     datasetTitle: "1. 데이터셋",
     download: "내려받기",
     downloading: "내려받는 중",
     loaded: "이 페이지에 적재됨",
+    fromKeras: "Keras 데이터셋 저장소에서 내려받습니다.",
+    fromMirror:
+      "이 사이트에 사본이 있습니다. 원본은 cs.toronto.edu이며 브라우저의 직접 접근(CORS)을 허용하지 않습니다.",
     cachedNote: "이 브라우저에 저장되어 있습니다. 다시 내려받지 않습니다.",
     notCached: "아직 저장되지 않았습니다. 처음 내려받을 때 파일을 가져옵니다.",
     bytes: "크기",
     counts: "학습 / 테스트",
     license: "라이선스",
     citation: "출처",
+    source: "데이터 위치",
     modelTitle: "2. 모델과 학습",
     preset: "모델",
     mlp: "MLP: Flatten, Linear, ReLU, Dropout, Linear",
@@ -327,6 +342,19 @@ declare global {
   }
 }
 
+/** The five Keras datasets, then the mirrored entries of /data/index.json (never a Keras id twice). */
+async function listAllDatasets(signal?: AbortSignal): Promise<DatasetInfo[]> {
+  // A missing mirror must not hide the five Keras datasets, which need no mirror.
+  const mirrored = await listDatasets(signal).then(
+    (list) => list.filter((d) => !isKerasDataset(d.id)),
+    (cause: unknown) => {
+      console.warn("The dataset mirror is not available:", cause);
+      return [] as DatasetInfo[];
+    },
+  );
+  return [...kerasDatasetInfos(), ...mirrored];
+}
+
 const NN_PROMISE = () => import("../vendor/typenn/index.js") as Promise<NN>;
 
 export default function Lab({ locale }: { locale: Locale }) {
@@ -380,12 +408,18 @@ export default function Lab({ locale }: { locale: Locale }) {
     let alive = true;
     (async () => {
       try {
-        const list = await listDatasets();
+        const list = await listAllDatasets();
         if (!alive) return;
         setDatasets(list);
         const loaded = await Promise.all(
           list.map(
-            async (info) => [info.id, await loadManifest(info.id)] as const,
+            async (info) =>
+              [
+                info.id,
+                isKerasDataset(info.id)
+                  ? kerasCardManifest(info.id)
+                  : await loadManifest(info.id),
+              ] as const,
           ),
         );
         if (!alive) return;
@@ -394,7 +428,12 @@ export default function Lab({ locale }: { locale: Locale }) {
         const flags = await Promise.all(
           list.map(
             async (info) =>
-              [info.id, await isCached(info.id, byId[info.id]!)] as const,
+              [
+                info.id,
+                isKerasDataset(info.id)
+                  ? await kerasCached(info.id)
+                  : await isCached(info.id, byId[info.id]!),
+              ] as const,
           ),
         );
         if (alive) setCached(Object.fromEntries(flags));
@@ -411,7 +450,7 @@ export default function Lab({ locale }: { locale: Locale }) {
   useEffect(() => {
     const api: LabApi = {
       ready: readyPromise.current,
-      datasets: () => listDatasets(),
+      datasets: () => listAllDatasets(),
       run: async (config) => {
         const full = { ...defaultConfig(config.dataset), ...config };
         return runRef.current(full);
@@ -444,9 +483,13 @@ export default function Lab({ locale }: { locale: Locale }) {
     if (known) return known;
     setLoading({ id, loaded: 0, total: 1 });
     try {
-      const data = await loadDataset(id, {
-        onProgress: (loaded, total) => setLoading({ id, loaded, total }),
-      });
+      const options = {
+        onProgress: (loaded: number, total: number) =>
+          setLoading({ id, loaded, total }),
+      };
+      const data = isKerasDataset(id)
+        ? await loadKerasDataset(id, options)
+        : await loadDataset(id, options);
       memory.current.set(id, data);
       setLoadedIds((ids) => (ids.includes(id) ? ids : [...ids, id]));
       setCached((flags) => ({ ...flags, [id]: true }));
@@ -596,6 +639,12 @@ export default function Lab({ locale }: { locale: Locale }) {
                       <dd>{m.license}</dd>
                       <dt>{words.citation}</dt>
                       <dd>{m.citation}</dd>
+                      <dt>{words.source}</dt>
+                      <dd>
+                        {d.origin === "keras"
+                          ? words.fromKeras
+                          : words.fromMirror}
+                      </dd>
                     </dl>
                   )}
                   <div className="lab-card-actions">
@@ -1059,10 +1108,13 @@ function TextTry({ session, words }: { session: Session; words: Words }) {
     try {
       setError(null);
       if (!vocab.current) {
-        const file = data.manifest.vocabularyFile?.file ?? "vocabulary.json";
-        const list = (await (
-          await fetch(`/data/${data.info.id}/${file}`)
-        ).json()) as string[];
+        const list =
+          data.vocabulary ??
+          ((await (
+            await fetch(
+              `/data/${data.info.id}/${data.manifest.vocabularyFile?.file ?? "vocabulary.json"}`,
+            )
+          ).json()) as string[]);
         vocab.current = { list, index: wordIndex(list) };
       }
       const encoding = data.manifest.tokenEncoding!;

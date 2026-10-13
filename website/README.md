@@ -39,29 +39,42 @@ not a performance benchmark.
 
 ## Datasets
 
-The Playground trains TypeNN models in the browser on the Keras datasets. Browsers cannot fetch
-the Keras sources (they send no CORS headers), so the deploy mirrors them under
-`public/data/`, served at `/data/`. `scripts/fetch_datasets.py` builds the mirror:
+The lab trains TypeNN models in the browser on the Keras datasets. Five of them download directly
+from the Keras dataset storage. The browser uses the JSON API URL of each file, because the XML URL
+sends no CORS headers and the JSON API URL does. `src/lab/keras.ts` does the work. It checks each
+file's SHA-256, caches the file in the Cache API and decodes it. The decoder reads `.npz` and
+`.npy` files, the pickle of numpy object arrays, and the IDX `.gz` files. It also repeats the Keras
+split with numpy's `RandomState` shuffle.
+
+CIFAR-10 and CIFAR-100 stay mirrored on this site. Their only source, cs.toronto.edu, does not allow
+cross-origin downloads. `scripts/fetch_datasets.py` builds the mirror under `public/data/`, and
+Cloudflare serves it at `/data/`. The deploy builds only the two CIFAR datasets:
 
 ```sh
-npm run datasets                              # all datasets, into public/data/
-python3 scripts/fetch_datasets.py --only mnist,imdb
+npm run datasets                              # cifar10 and cifar100, into public/data/
+python3 scripts/fetch_datasets.py --all       # all seven, for the parity test
+python3 scripts/fetch_datasets.py --only mnist
 ```
 
 The script needs Python 3 and numpy. It downloads each source to `.dataset-cache/` (skipped when
 present), checks its SHA-256 against a table in the script, and writes per dataset a
-`manifest.json` and binary parts. `public/data/index.json` lists the datasets. The deploy job
-runs the script before the build. Cloudflare limits one static asset to 25 MiB, so the script
-keeps every output file at 20 MiB or less and splits larger arrays into `.partN.bin` files.
+`manifest.json` and binary parts. `public/data/index.json` lists the mirrored datasets. Cloudflare
+limits one static asset to 25 MiB, so the script keeps every output file at 20 MiB or less and
+splits larger arrays into `.partN.bin` files.
 
-| Dataset             | Source                                  | License and citation                                                                                                               |
-| ------------------- | --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| MNIST               | `mnist.npz` (Keras)                     | CC BY-SA 3.0, per the Keras documentation. LeCun, Cortes and Burges.                                                               |
-| Fashion-MNIST       | the four IDX files (Keras base URL)     | MIT, Zalando SE. Xiao, Rasul and Vollgraf, 2017.                                                                                   |
-| CIFAR-10, CIFAR-100 | the binary editions from cs.toronto.edu | No explicit license. Krizhevsky, 2009 (tech report; cite it).                                                                      |
-| IMDB                | `imdb.npz` (Keras)                      | No explicit license that we know of. Maas et al., ACL 2011. Vocabulary capped at 10000 words.                                      |
-| Reuters             | `reuters.npz` (Keras)                   | Reuters-21578: free distribution for research purposes, per its readme (not a standard license). Vocabulary capped at 10000 words. |
-| California housing  | `california_housing.npz` (Keras)        | StatLib, Pace and Barry, 1997. No explicit license found.                                                                          |
+`npm run test:keras` checks the browser decoder against that mirror. It reads the source files
+from the cache and the parts from `public/data/`, and it needs both. It decodes each of the five
+datasets and compares every array byte for byte. Override the directories with
+`TYPENN_DATASET_CACHE` and `TYPENN_DATASET_MIRROR`.
+
+| Dataset             | Source                                             | License and citation                                                                                                               |
+| ------------------- | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| MNIST               | `mnist.npz` (Keras storage, direct)                | CC BY-SA 3.0, per the Keras documentation. LeCun, Cortes and Burges.                                                               |
+| Fashion-MNIST       | the four IDX files (Keras storage, direct)         | MIT, Zalando SE. Xiao, Rasul and Vollgraf, 2017.                                                                                   |
+| CIFAR-10, CIFAR-100 | the binary editions (mirrored from cs.toronto.edu) | No explicit license. Krizhevsky, 2009 (tech report; cite it).                                                                      |
+| IMDB                | `imdb.npz` (Keras storage, direct)                 | No explicit license that we know of. Maas et al., ACL 2011. Vocabulary capped at 10000 words.                                      |
+| Reuters             | `reuters.npz` (Keras storage, direct)              | Reuters-21578: free distribution for research purposes, per its readme (not a standard license). Vocabulary capped at 10000 words. |
+| California housing  | `california_housing.npz` (Keras storage, direct)   | StatLib, Pace and Barry, 1997. No explicit license found.                                                                          |
 
 The text datasets use the Keras loader's split, seed 113 and token encoding. Their token ids
 are `uint16` and the vocabulary is capped at 10000 words for the bag-of-words input.
@@ -69,10 +82,12 @@ are `uint16` and the vocabulary is capped at 10000 words for the bag-of-words in
 ## Training lab
 
 `/lab/` and `/ko/lab/` train TypeNN models in the browser on the full training split of each
-dataset. The page loads the mirrored data, trains with `Module`, `Sequential`, `Linear`, `Conv2d`
+dataset. The page loads the five Keras datasets from the Keras storage and the CIFAR mirror from
+`/data/`, trains with `Module`, `Sequential`, `Linear`, `Conv2d`
 and `MaxPool2d` (site-defined over `Tensor.conv2d` and `Tensor.maxPool`), the losses and the Adam
 or SGD optimizer, and evaluates on the full test split after each epoch. `src/lab/train.ts` holds
-the training loop, `src/lab/datasets.ts` the loader and `src/components/Lab.tsx` the page.
+the training loop, `src/lab/datasets.ts` the loader for the mirror, `src/lab/keras.ts` the loader for the Keras storage, and
+`src/components/Lab.tsx` the page.
 
 The CNN preset uses `Conv2d` and `MaxPool2d`. The TypeNN declarations do not export them, so
 `src/lab/train.ts` defines both as `Module` subclasses. It creates their trainable leaves with the
@@ -86,7 +101,7 @@ button, and it updates the page too:
 ```ts
 interface LabApi {
   ready: Promise<void>; // resolves when the island has mounted
-  datasets(): Promise<DatasetInfo[]>; // the entries of /data/index.json
+  datasets(): Promise<DatasetInfo[]>; // the five Keras datasets, then the entries of /data/index.json
   run(config: Partial<RunConfig> & { dataset: string }): Promise<RunResult>; // missing fields take the dataset defaults
   stop(): void; // stops after the current step; the result has completed: false
   readonly results: RunResult[]; // the finished and stopped runs of this page, oldest first
