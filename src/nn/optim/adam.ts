@@ -1,5 +1,7 @@
 import type { Tensor } from "../../tensor/tensor.js";
-import { Optimizer } from "./optimizer.js";
+import { sizeOf } from "../../tensor/shape.js";
+import { Optimizer, type StepOptions } from "./optimizer.js";
+import { adamFirstOf, adamSecondOf, adamUpdateOf } from "./update.js";
 
 export interface AdamOptions {
   readonly lr: number;
@@ -8,9 +10,10 @@ export interface AdamOptions {
   readonly epsilon?: number;
 }
 
+/** The moments of one parameter. They are device tensors of the parameter's shape. */
 interface Moments {
-  readonly first: Float32Array;
-  readonly second: Float32Array;
+  first: Tensor;
+  second: Tensor;
 }
 
 export class Adam extends Optimizer {
@@ -19,7 +22,7 @@ export class Adam extends Optimizer {
   readonly beta1: number;
   readonly beta2: number;
   readonly epsilon: number;
-  private readonly moments = new WeakMap<Tensor, Moments>();
+  private readonly moments = new Map<Tensor, Moments>();
   private iteration = 0;
 
   constructor(parameters: readonly Tensor[], options: AdamOptions) {
@@ -38,35 +41,83 @@ export class Adam extends Optimizer {
       throw new RangeError("Adam epsilon must be a positive finite number.");
   }
 
-  async step(): Promise<void> {
-    const gradients = await this.gradients();
-    this.iteration++;
-    const firstCorrection = 1 - this.beta1 ** this.iteration;
-    const secondCorrection = 1 - this.beta2 ** this.iteration;
-    for (const [index, parameter] of this.parameters.entries()) {
-      const updated = parameter.parameterValues().slice();
-      const gradient = gradients[index]!;
-      let moment = this.moments.get(parameter);
-      if (!moment) {
-        moment = {
-          first: new Float32Array(updated.length),
-          second: new Float32Array(updated.length),
-        };
-        this.moments.set(parameter, moment);
-      }
-      for (let element = 0; element < updated.length; element++) {
-        const value = gradient[element]!;
-        moment.first[element] =
-          this.beta1 * moment.first[element]! + (1 - this.beta1) * value;
-        moment.second[element] =
-          this.beta2 * moment.second[element]! +
-          (1 - this.beta2) * value * value;
-        const first = moment.first[element]! / firstCorrection;
-        const second = moment.second[element]! / secondCorrection;
-        updated[element] -=
-          (this.learningRate * first) / (Math.sqrt(second) + this.epsilon);
-      }
-      await parameter.assign(updated);
+  /**
+   * Update every parameter and both moments on the device, in one plan. The new moments and
+   * parameters take the arrays the plan computed; no gradient is read back and no parameter is
+   * uploaded. The first step starts the moments at zero. The values of `options.alsoRead` are
+   * returned, read in the same plan.
+   */
+  async step(options: StepOptions = {}): Promise<Float32Array[]> {
+    const device = this.parameters[0]!.device;
+    const alsoRead = this.readTensors(options, device);
+    const gradients = this.gradientTensors();
+    const iteration = this.iteration + 1;
+    const firstCorrection = 1 - this.beta1 ** iteration;
+    const secondCorrection = 1 - this.beta2 ** iteration;
+    const moments = this.parameters.map((parameter) =>
+      this.momentsOf(parameter),
+    );
+    const firsts = this.parameters.map((_, index) =>
+      adamFirstOf(moments[index]!.first, gradients[index]!, this.beta1),
+    );
+    const seconds = this.parameters.map((_, index) =>
+      adamSecondOf(moments[index]!.second, gradients[index]!, this.beta2),
+    );
+    const updates = this.parameters.map((parameter, index) =>
+      adamUpdateOf(parameter, firsts[index]!, seconds[index]!, [
+        this.learningRate,
+        firstCorrection,
+        secondCorrection,
+        this.epsilon,
+      ]),
+    );
+    const computed = [...updates, ...firsts, ...seconds];
+    let values: Float32Array[];
+    try {
+      values = await device.computeAll(computed, alsoRead);
+    } catch (error) {
+      // A plan or a read that failed leaves the parameters and the moments as they were.
+      for (const tensor of computed) device.release(tensor);
+      throw error;
     }
+    // The plan is complete: the results replace the arrays they were computed from.
+    try {
+      this.parameters.forEach((parameter, index) => {
+        device.adopt(moments[index]!.first, firsts[index]!);
+        device.adopt(moments[index]!.second, seconds[index]!);
+        device.adopt(parameter, updates[index]!);
+      });
+    } finally {
+      // An adoption that failed (a disposed parameter) leaves no computed array behind.
+      for (const tensor of computed) device.release(tensor);
+    }
+    this.iteration = iteration;
+    return values;
+  }
+
+  override async dispose(): Promise<void> {
+    // The moments hold no host value that a reader needs: free their arrays without a read-back.
+    for (const { first, second } of this.moments.values()) {
+      const device = first.device;
+      if (device.isDisposed()) break;
+      device.release(first);
+      device.release(second);
+    }
+    this.moments.clear();
+    this.iteration = 0;
+  }
+
+  /** The moments of a parameter, which start at zero. */
+  private momentsOf(parameter: Tensor): Moments {
+    let moments = this.moments.get(parameter);
+    if (!moments) {
+      const zeros = () =>
+        parameter.device.tensor(new Float32Array(sizeOf(parameter.shape)), {
+          shape: parameter.shape,
+        });
+      moments = { first: zeros(), second: zeros() };
+      this.moments.set(parameter, moments);
+    }
+    return moments;
   }
 }

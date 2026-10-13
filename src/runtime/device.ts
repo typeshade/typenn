@@ -6,10 +6,11 @@ import {
   type Runtime,
 } from "typeshade/runtime";
 import type { FuseReport } from "typeshade/fuse";
+import type { DevicePlan } from "./device-types.js";
 import { checkedShape, sizeOf, type Shape } from "../tensor/shape.js";
 import type { OpNode } from "../tensor/node.js";
 import { Tensor } from "../tensor/tensor.js";
-import { execute, type Memory } from "./execute.js";
+import { compute, execute, type Memory } from "./execute.js";
 import type {
   BackendInfo,
   DeviceOptions,
@@ -31,36 +32,58 @@ let activeDevice: Device | undefined;
 /** How many reports of plans `Device.reports` keeps. */
 const REPORT_HISTORY = 256;
 
+/**
+ * The most bytes of released arrays the device keeps for reuse, unless `poolBytes` says otherwise.
+ * Each array counts once, at its byte length: its host copy and its device buffer are one each.
+ */
+const DEFAULT_POOL_BYTES = 64 * 1024 * 1024;
+
 export class Device {
   readonly backend: BackendInfo;
-  private readonly live = new Set<Resident<Float32Array>>();
+  /** Every array the device made and has not freed, with its number of elements. */
+  private readonly live = new Map<Resident<Float32Array>, number>();
+  /** The released arrays kept for reuse, by number of elements. Each is also in `live`. */
+  private readonly free = new Map<number, Resident<Float32Array>[]>();
+  private pooledBytes = 0;
+  private readonly poolBytes: number;
   private readonly pending = new Set<Promise<unknown>>();
   private readonly history: FuseReport[] = [];
+  private plan?: DevicePlan;
   private readonly memory: Memory = {
-    keep: (values) => {
-      const array = resident(values);
-      this.live.add(array);
-      return array;
-    },
+    keep: (values) => this.acquire(values.length, values),
+    output: (length) => this.acquire(length),
     drop: (array) => {
-      this.live.delete(array);
+      // An array is destroyed once: not again after the device freed it.
+      if (!this.live.delete(array)) return;
       array.destroy();
     },
-    record: (report) => {
+    recycle: (array) => this.recycle(array),
+    record: (report, nodes) => {
       this.history.push(report);
       if (this.history.length > REPORT_HISTORY) this.history.shift();
+      this.plan = { report, nodes: nodes.slice() };
     },
   };
   private runtime?: Runtime;
   private disposed = false;
   private disposing = false;
 
-  private constructor(backend: BackendInfo, runtime?: Runtime) {
+  private constructor(
+    backend: BackendInfo,
+    poolBytes: number,
+    runtime?: Runtime,
+  ) {
     this.backend = backend;
+    this.poolBytes = poolBytes;
     this.runtime = runtime;
   }
 
   static async open(options: DeviceOptions = {}): Promise<Device> {
+    const poolBytes = options.poolBytes ?? DEFAULT_POOL_BYTES;
+    if (!Number.isSafeInteger(poolBytes) || poolBytes < 0)
+      throw new RangeError(
+        "The poolBytes option is a whole number of bytes, 0 or more.",
+      );
     const preference = options.device ?? "auto";
     if (!isDevicePreference(preference))
       throw new TypeError(
@@ -111,6 +134,7 @@ export class Device {
         name,
         ...(fallbackReason ? { fallbackReason } : {}),
       },
+      poolBytes,
       name === "webgpu" ? runtime : undefined,
     );
     activeDevice = device;
@@ -120,6 +144,15 @@ export class Device {
   /** The report of the last plan a `data()` ran, or undefined before the first. */
   get lastReport(): FuseReport | undefined {
     return this.history[this.history.length - 1];
+  }
+
+  /**
+   * The last plan the executor ran, with the graph id of each kernel call in its scope
+   * (`nodes[k]` for the k-th call), or undefined before the first. A failed plan leaves
+   * `lastPlan`, `lastReport` and `reports` as they were.
+   */
+  get lastPlan(): DevicePlan | undefined {
+    return this.plan;
   }
 
   /** The reports of the last 256 plans, oldest first. */
@@ -179,12 +212,92 @@ export class Device {
     return task;
   }
 
-  /** @internal Free the array of a tensor. */
+  /**
+   * @internal Compute several tensors in one plan and keep their arrays. The tensors of `alsoRead`
+   * are computed in that plan too, and their values are read back once, after it.
+   */
+  computeAll(
+    tensors: readonly Tensor[],
+    alsoRead: readonly Tensor[] = [],
+  ): Promise<Float32Array[]> {
+    this.assertUsable();
+    const task: Promise<Float32Array[]> = execute(
+      tensors,
+      this.memory,
+      alsoRead,
+    ).finally(() => this.pending.delete(task));
+    this.pending.add(task);
+    return task;
+  }
+
+  /**
+   * @internal Make the computed array of `source` the array of `target`, and free the array
+   * `target` held. `source` keeps none. The host value of `target` is stale until it is read.
+   */
+  adopt(target: Tensor, source: Tensor): void {
+    this.assertUsable();
+    const array = source.storage;
+    if (array === undefined)
+      throw new Error("adopt() needs a tensor that a plan computed.");
+    try {
+      target.assertUsable();
+    } catch (error) {
+      // A disposed target takes no array: the computed one is released, not leaked.
+      this.release(source);
+      throw error;
+    }
+    this.release(target);
+    target.storage = array;
+    target.hostStale = true;
+    source.storage = undefined;
+  }
+
+  /** @internal Give back the array of a tensor, which the device reuses or frees. */
   release(tensor: Tensor): void {
     const array = tensor.storage;
     if (array === undefined) return;
     tensor.storage = undefined;
-    this.memory.drop(array);
+    this.memory.recycle(array);
+  }
+
+  /** The array for `length` values: a pooled one, with `values` written to it, or a new one. */
+  private acquire(
+    length: number,
+    values?: Float32Array,
+  ): Resident<Float32Array> {
+    const pooled = this.takeFree(length);
+    if (pooled !== undefined) {
+      // A pooled array is written only where the caller gives values; an output is overwritten.
+      if (values !== undefined) pooled.write(values);
+      return pooled;
+    }
+    const array = resident(values ?? new Float32Array(length));
+    this.live.set(array, length);
+    return array;
+  }
+
+  private takeFree(length: number): Resident<Float32Array> | undefined {
+    const list = this.free.get(length);
+    const array = list?.pop();
+    if (list !== undefined && list.length === 0) this.free.delete(length);
+    if (array !== undefined)
+      this.pooledBytes -= length * Float32Array.BYTES_PER_ELEMENT;
+    return array;
+  }
+
+  /** Keep a released array for reuse while the pool has room, and free it otherwise. */
+  private recycle(array: Resident<Float32Array>): void {
+    const length = this.live.get(array);
+    if (length === undefined) return;
+    const bytes = length * Float32Array.BYTES_PER_ELEMENT;
+    if (this.pooledBytes + bytes > this.poolBytes) {
+      this.memory.drop(array);
+      return;
+    }
+    const list = this.free.get(length);
+    if (list === undefined) this.free.set(length, [array]);
+    else list.push(array);
+    this.pooledBytes += bytes;
   }
 
   async dispose(): Promise<void> {
@@ -192,8 +305,11 @@ export class Device {
     this.disposing = true;
     await Promise.allSettled([...this.pending]);
     this.disposed = true;
-    for (const array of this.live) array.destroy();
+    // The pooled arrays are in `live` too, so each is destroyed once here.
+    for (const array of this.live.keys()) array.destroy();
     this.live.clear();
+    this.free.clear();
+    this.pooledBytes = 0;
     this.runtime?.destroy();
     resetConfiguration();
     if (activeDevice === this) activeDevice = undefined;

@@ -35,8 +35,8 @@ The operation set is:
 - NHWC `conv2d`, `maxPool` and `avgPool`
 - `reshape`
 
-[TODO.md](./TODO.md) lists what is open. `Linear`, `ReLU`, and `Sequential` compose operations for
-inference:
+[TODO.md](./TODO.md) lists what is open. `Linear`, `Conv2d`, `MaxPool2d`, `AvgPool2d`, `ReLU`, `Tanh`, `Sigmoid` and `Sequential` compose
+operations for inference:
 
 ```ts
 const model = new nn.Sequential(new nn.Linear(784, 10));
@@ -51,11 +51,15 @@ Tensors, the scalars the kernel function takes by value, and the gradient rule. 
 these steps:
 
 1. Collect the nodes under the Tensor that have no array yet, in graph order.
-2. Make one `Resident` array for each node, and upload each leaf that has no array yet.
+2. Take one `Resident` array for each node from the device's pool of released arrays, or make one.
+   Upload each leaf that has no array yet.
 3. Call `fuse` (`typeshade/fuse`) with a body that calls `kernel(out, ...inputs, ...values)` for each
    node.
 4. Keep the `FuseReport` of the scope as `device.lastReport`.
 5. Read the Tensor back, once.
+
+A kernel call writes every element of its output. So a pooled array keeps the values it held before,
+and TypeNN does not zero it or upload zeros for it.
 
 The compiler plans the scope. It puts consecutive calls in one dispatch when the facts of TypeShade
 Rule 11.13 hold. `device.lastReport` shows the plan:
@@ -84,10 +88,51 @@ The same code path runs on every tier. On the CPU tier the scope runs the calls 
 other. The report then has `dispatches: 0`, `submissions: 0` and one group for each call.
 
 A Tensor keeps its array after a read, so a later `data()` of it, or of a Tensor under it, adds no
-dispatch for it. `dispose()` and `disposeGraph()` free the arrays. A call that takes one Tensor
-twice, such as `a.add(a)`, reads the second one from a copy in a scratch array. One `Resident` must
-not be two parameters of one call. If a plan fails, TypeNN frees the arrays of that plan and
-rethrows the error. The next `data()` computes them again.
+dispatch for it. A call that takes one Tensor twice, such as `a.add(a)`, reads the second one from a
+copy in a scratch array. One `Resident` must not be two parameters of one call. If a plan fails,
+TypeNN frees the arrays of that plan and rethrows the error. The next `data()` computes them again.
+
+### The pool of released arrays
+
+`dispose()`, `disposeGraph()`, a step of an optimizer and the `zeroGrad()` of an optimizer give
+their arrays back to the device. The device keeps a released array while the pool has room, and
+gives it to a later plan of the same number of elements. The pool holds at most `poolBytes` bytes,
+which is 64 MiB by default. An array that does not fit is freed at once. Pass `poolBytes: 0` to
+free every released array at once:
+
+```ts
+const device = await nn.device({
+  device: "webgpu",
+  poolBytes: 16 * 1024 * 1024,
+});
+```
+
+A pooled array is never given to a Tensor that still holds it. An array that `device.adopt()`
+moves into a parameter leaves the pool's ownership. `device.dispose()` frees every array, pooled or
+not, each once. The arrays of a plan that failed are freed, not pooled.
+
+## Inspecting a graph
+
+`nn.graph(tensor)` returns the graph under a Tensor. It lists each reachable Tensor once. An input
+comes before each Tensor that uses it:
+
+```ts
+const snapshot = nn.graph(a.matmul(b).add(c).relu());
+for (const node of snapshot.nodes)
+  console.log(node.id, node.op, node.shape, node.inputs);
+```
+
+Each node has an `id`, which stays the same for the life of its Tensor. `computed` is true when the
+Tensor already holds an array. `computed` is true for every input Tensor. A later `data()` does not
+compute it.
+
+After a read, `device.lastPlan` describes the plan. Its `report` is the `FuseReport`, and its `nodes`
+holds the graph id of each kernel call, in call order. The calls of `report.groups` line up with
+`nodes`. A copy that a repeated input needs takes the id of the operation that reads it.
+`device.lastReport` and `device.reports` do not change.
+
+If a plan fails, `device.lastPlan`, `device.lastReport` and `device.reports` keep the values they had
+before the failed plan.
 
 ## Devices and tiers
 
@@ -101,7 +146,8 @@ rethrows the error. The next `data()` computes them again.
 | `"cpu"`            | CPU                                          | Not applicable                                              |
 
 `device.backend.name` is the tier selected. The option `gpuDevice` hands TypeNN a `GPUDevice` that
-the application owns. TypeNN runs its kernel functions on it and never destroys it. TypeShade's
+the application owns. TypeNN runs its kernel functions on it and never destroys it. The option
+`poolBytes` bounds the pool of released arrays (see How a read runs). TypeShade's
 call-layer configuration is process-global, so TypeNN permits one active device per JavaScript
 context.
 
@@ -184,19 +230,32 @@ for await (const batch of batches) {
   const logits = model.forward(images);
   const loss = criterion.forward(logits, batch.labels); // integer class IDs
   await loss.backward();
-  await optimizer.step();
+  const [batchLoss] = await optimizer.step({ alsoRead: [loss] });
   await loss.disposeGraph(model.parameters());
 }
 
 model.eval();
 ```
 
+`step({ alsoRead })` computes each Tensor of `alsoRead` in the plan of the update, from the
+parameters before the update. It returns their values, in order, and reads them back once. One step
+is then one plan and one readback of the loss. On WebGPU, `step()` does not wait for the device to
+run its plan. It waits for the validation result of the plan. A reduction that reads its partials
+back waits at that level. With `alsoRead`, it also waits for the readback of the loss, which waits
+for the plan.
+
+The loss is not in the update's plan unless `alsoRead` names it. A `loss.data()` after `step()`
+therefore computes the loss in a new plan: on the fake device of `buffer-pool.test.mjs`, two
+dispatches and two submissions. A `loss.data()` before `backward()`, as the lab read it before this
+change, adds a plan to the step too. Read the loss with `alsoRead`.
+
 The complete IDX dataset loader, shuffled batch loop, and evaluation example are in
 [`examples/mnist`](./examples/mnist). It keeps images as uint8 on the host, normalizes each
 batch, uses logits directly with sparse-label cross entropy, and evaluates by argmax. The Tensor
-forward and backward operations run as kernel functions on the selected tier. An optimizer reads the
-gradients of all its parameters in one plan. Adam moment calculation and parameter updates use host
-arrays, so this example demonstrates the API and is not tuned for training throughput.
+forward and backward operations run as kernel functions on the selected tier. An optimizer step
+computes the gradients and the parameter and moment updates in one plan, on the device. It reads no
+gradient back and uploads no parameter. This example demonstrates the API. Its speed on SwiftShader
+is in the Measurements section.
 
 `createTrainer()` remains limited to a single `Linear` classifier and SGD. It runs the same Tensor
 graph as the explicit loop: `matmul`, bias, softmax cross entropy, `backward()` and an `SGD` step.
@@ -242,7 +301,7 @@ console.log(await weightGradient.data());
 
 `gradients(output, wrt, upstream?)` returns deferred gradient Tensors. Without an explicit
 `upstream`, `output` must contain one value. The first graph rules cover ReLU, broadcast
-add/subtract/multiply/divide, unary arithmetic and trigonometric ops, rank-2 MatMul including
+add/subtract/multiply/divide, unary arithmetic and trigonometric ops, `sigmoid` and `tanh`, rank-2 MatMul including
 transpose options, Conv2D, 2D pooling, `sum`/`mean` reductions, and logits-based softmax cross
 entropy. `prod`/`max`/`min` reduction gradients and special activation gradients remain
 unsupported, and ask for the missing rule by name when called.
@@ -254,11 +313,28 @@ unsupported, and ask for the missing rule by name when called.
 - Pure numerical operations are TypeShade kernel functions on every tier. TypeNN keeps no separate
   JavaScript math implementation. The tests keep one, as a reference.
 - Intermediate tensors stay resident until disposed or the device is disposed. Use `disposeGraph()`
-  to release an operation graph while preserving parameters.
+  to release an operation graph while preserving parameters. A released array goes to the pool of
+  the device (see How a read runs).
 - `Module.to()`, `parameters()`, `train()`, and `eval()` support user-defined models and
-  registered child layers. `Flatten`, `Linear`/`Dense`, `ReLU`, and `Dropout` cover the example.
-- `Tensor.backward()` accumulates gradients on registered parameter leaves. SGD and Adam
-  optimizer objects update host parameter arrays. Adam is not yet a device kernel.
+  registered child layers. `Flatten`, `Linear`/`Dense`, `Conv2d`, `MaxPool2d`, `AvgPool2d`, `ReLU`, `Tanh`, `Sigmoid` and
+  `Dropout` are the layers. `MaxPool2d` and `AvgPool2d` default `strides` to `filterSize`
+  (the `maxPool` and `avgPool` operations default it to 1). The example uses
+  `Flatten`, `Linear`, `ReLU` and `Dropout`. The losses are `CrossEntropyLoss`, with sparse integer
+  labels, and `MSELoss`, the mean of squared differences. They are `nn.loss.crossEntropy` and
+  `nn.loss.mse`.
+- `Tensor.backward()` accumulates gradients on registered parameter leaves. SGD and Adam update
+  the parameters, and the Adam moments, on the device, in one plan (`src/kernels/optim.shade.ts`).
+  A step reads no gradient back and uploads no parameter. The moments start at zero on the first
+  step. A parameter keeps its Tensor object, and its host copy is read back on demand:
+  `parameterValues()`, `data()` and `dispose()` do it. A layer's `weight` and `bias` arrays are the
+  host copy of its parameters. They lag behind the device, and `await model.sync()` refreshes the
+  arrays of every layer in one plan. The `fit()` of a Trainer does it at its end, also when the fit
+  fails.
+- `parameterValues()` is `async` and returns `Promise<Float32Array>`. It was synchronous, and it
+  returned the host array without a read. Add an `await` to each call. `Module.sync()` and
+  `Optimizer.dispose()` are new. `dispose()` frees the Adam moments on the device (the moments
+  also go with the device). `Device.dispose()` does not read the parameters back: call `sync()`
+  first when the host arrays must hold the trained values.
 - Tensor-graph autograd remains limited. Model serialization and WebNN are not implemented.
 - `shadeGrad`/`shadeGradCheck` operate on pure TypeShade functions only.
 
@@ -280,12 +356,13 @@ back. The plan alone is one submission (`device.lastReport.submissions`).
 | a dense layer `x.matmul(w).add(bias).relu()`      |                 3 |                1 |                  2 |                 2 |
 | MNIST forward, `loss.data()`                      |                 9 |                5 |                  2 |                 2 |
 | MNIST backward, four `grad.data()` calls          |                11 |               10 |                  8 |                 8 |
-| MNIST backward, `optimizer.step()` reads all four |                11 |               10 |                  8 |                 5 |
+| MNIST backward, `optimizer.step()` reads all four |                11 |               10 |                  8 |                 1 |
 
 The graphs are the chain of 1,024 elements, a dense layer of 784 inputs and 128 outputs on 64 rows,
 and the model of `examples/mnist` on a batch of 64. Before, an optimizer read each gradient with a
-`data()` of its own. Now it reads the gradients of all its parameters in one plan, which is the last
-row.
+`data()` of its own. In the last row the step of this branch computes the gradients inside its
+update plan, so it is one submission. The dispatches stay 10, because the update calls join the
+dispatches of the backward pass.
 
 ### Size of the build
 
@@ -356,6 +433,94 @@ previous build, point `--dist` to its compiled `dist` directory and run
 the same command with identical axis lengths. GPU timestamp measurements,
 hardware-tiled matmul and device-resident Adam updates are not implemented.
 
+### Pool and read in the step
+
+Before is `origin/main` at commit `3a6ba27`, which reads the loss with `data()` before `backward()`.
+After is this branch, with the pool and the loop of `step({ alsoRead })`. The fake device counts the
+calls of the runtime, and reads zeros back. The SwiftShader device runs them on the CPU.
+
+Per steady step, after three warm-up steps, with Adam, batch 64:
+
+| Measure, one training step        | MLP before | MLP after, `alsoRead` | CNN before | CNN after, `alsoRead` |
+| --------------------------------- | ---------: | --------------------: | ---------: | --------------------: |
+| Buffers made                      |         56 |                    20 |         56 |                    20 |
+| Storage buffers made              |         36 |                     0 |          - |                     0 |
+| Bytes uploaded                    |  2,341,192 |               239,272 | 10,125,896 |               206,248 |
+| Bytes uploaded that are all zeros |  2,101,924 |                     4 |  9,919,652 |                     4 |
+| Submissions (SwiftShader agrees)  |          3 |                     2 |          3 |                     2 |
+| Dispatches                        |         19 |                    19 |         19 |                    19 |
+| Bytes read back                   |          4 |                     4 |          4 |                     4 |
+
+The 20 buffers that remain are the runtime's own: one uniform buffer for each of the 19 dispatches,
+and one staging buffer for the readback of the loss. The 4 bytes are the loss. The pool reuses its
+array after the read, and the runtime uploads the host copy of that array again. The fake device
+reads that copy as zeros. The "Storage buffers made" row for the MLP before comes from the usage of
+its buffers. The CNN before was not split. The read-first loop of this branch (`loss.data()` before
+`backward()`) makes the same 20 buffers and 19 dispatches, no zero bytes, and three submissions.
+
+The pool needs room for the arrays a step releases. The steady-state storage buffers of the CNN
+reach zero with a pool of 16 MiB. With 8 MiB the step still makes 3 storage buffers. The MLP needs
+4 MiB. The default of 64 MiB leaves room for a larger batch.
+
+Time per step, in milliseconds. These are the medians of 20 steps after 5 warm-up steps. Each round
+is one run of `scripts/bench-step.mjs`. The rounds of the two builds alternate.
+
+| Scenario, on SwiftShader (WebGPU) | Build                       | Rounds              | Median |
+| --------------------------------- | --------------------------- | ------------------- | -----: |
+| MNIST step, batch 64, Adam        | before                      | 248.6, 178.2, 220.2 |  220.2 |
+| MNIST step, batch 64, Adam        | after, `alsoRead`           | 229.7, 224.8, 234.0 |  229.7 |
+| MNIST step, batch 64, Adam        | after, read before backward | 173.1, 196.2, 201.0 |  196.2 |
+| CNN step, batch 64, Adam          | before                      | 795.3, 858.6, 811.8 |  811.8 |
+| CNN step, batch 64, Adam          | after, `alsoRead`           | 797.3, 668.3, 815.6 |  797.3 |
+| CNN step, batch 64, Adam          | after, read before backward | 737.1, 831.1, 771.9 |  771.9 |
+
+On SwiftShader the rounds of one build differ by up to 20 percent, and the two builds overlap. The
+software device runs the kernels on the CPU, so the time of a step is mostly the kernels. The change
+does not show in these rows. The host time of a step is the time JavaScript spends with the device
+given no work. Median of three runs of 20 steps, on the fake device in Node 22:
+
+| Host time per step, fake device | Build                       | Runs (ms)           | Median |
+| ------------------------------- | --------------------------- | ------------------- | -----: |
+| MLP                             | before                      | 74.8, 78.4, 79.5    |   78.4 |
+| MLP                             | after, read before backward | 26.5, 30.0, 44.7    |   30.0 |
+| MLP                             | after, `alsoRead`           | 28.6, 28.9, 30.7    |   28.9 |
+| CNN                             | before                      | 339.9, 348.9, 364.4 |  348.9 |
+| CNN                             | after, read before backward | 129.9, 140.2, 188.9 |  140.2 |
+| CNN                             | after, `alsoRead`           | 122.9, 135.1, 143.3 |  135.1 |
+
+Most of the host saving comes from the pool. The `alsoRead` loop saves one plan on top, which is
+within the noise of these runs. The values do not change. The losses of 20 steps are bit for bit those of `origin/main`, on the
+CPU tier in `buffer-pool.test.mjs` and on WebGPU in `tests/gpu/gpu.test.mjs`, with either loop.
+
+### Optimizer on the device
+
+The baseline here is `main` at commit `31e5387`, which the optimizer updated on the host. Both builds
+run the same `scripts/bench-step.mjs` on Chromium 141 with SwiftShader, and the rounds alternate.
+
+| Measure, one `step()` or one training step | Build  | Result                                   |
+| ------------------------------------------ | ------ | ---------------------------------------- |
+| SGD, `counts`: the step on the graph       | before | 10 dispatches in 5 submissions           |
+| SGD, `counts`: the step on the graph       | after  | 10 dispatches in 1 submission            |
+| Adam, `step`: the whole step, batch 64     | before | 15 dispatches in 7 submissions (one run) |
+| Adam, `step`: the whole step, batch 64     | after  | 19 dispatches in 3 submissions (one run) |
+
+The times are medians of 20 steps after 5 warm-up steps, in milliseconds. The rounds are in the order
+they ran.
+
+| Scenario                                                      | Build  | Rounds              | Median |
+| ------------------------------------------------------------- | ------ | ------------------- | -----: |
+| `optimizer.step()` alone, the queue finished inside the clock | before | 126.3, 111.9, 107.8 |  111.9 |
+| `optimizer.step()` alone, the queue finished inside the clock | after  | 126.4, 139.3, 141.2 |  139.3 |
+| whole MNIST step, batch 64, Adam                              | before | 198.5, 234.1, 203.5 |  203.5 |
+| whole MNIST step, batch 64, Adam                              | after  | 217.8, 252.0, 215.2 |  217.8 |
+
+On SwiftShader the device-side step is not faster. A software device runs the update kernels on the
+CPU, so each kernel costs about what the host loop it replaces cost, and the removed readbacks are
+short here. A hardware GPU is not measured in this table. An earlier measurement of `step()` without
+the flush read 30 to 40 ms, because the device had not finished the work when the clock stopped. The
+flushed rows are the ones above. The per-step traffic that this change removes is measured in the
+test `a training step reads back only the loss and uploads no parameter values`, on a fake device.
+
 ## Tests
 
 ```sh
@@ -370,6 +535,10 @@ TYPESHADE_CHROMIUM=/path/to/chrome npm run test:gpu   # builds, then runs tests/
   (`tests/_fake-gpu.mjs`, passed to `nn.device` as `gpuDevice`): the tier, the dispatches, the
   groups and the reason for each boundary.
 - `resources.test.mjs` asserts the arrays that a read, a failed plan and a disposal leave behind.
+- `buffer-pool.test.mjs` asserts the pool: the calls of a steady step on the fake device, the
+  values of 20 steps against the recorded values of `origin/main`, the reuse of a released array
+  (`a.add(a)`, a kept Tensor, `adopt()`), the bound of `poolBytes`, the frees of `device.dispose()`,
+  and `step({ alsoRead })`.
 - `graph-cpu.test.mjs`, `api.test.mjs`, `trainer.test.mjs` and `smoke.test.mjs` hold the graph and
   gradient rules, the refusals and their messages, the Trainer, and a first run.
 - `mnist.test.mjs` runs the MNIST example on the CPU tier, on synthetic data of the same shape.

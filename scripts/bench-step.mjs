@@ -2,13 +2,22 @@
 // that is software here (Chromium with SwiftShader).
 //
 //   npm run build
-//   TYPESHADE_CHROMIUM=/path/to/chrome node scripts/bench-step.mjs [--dist dist] [--scenario step|chain|counts]
-//                                                                  [--steps 20] [--warmup 5] [--length 1048576]
+//   TYPESHADE_CHROMIUM=/path/to/chrome node scripts/bench-step.mjs [--dist dist] [--scenario step|cnn|chain|counts]
+//                                       [--loop read-first|also-read] [--steps 20] [--warmup 5] [--length 1048576]
+//
+// The loops (`--loop`, for the `step` and `cnn` scenarios):
+//   read-first  the loss is read with `data()` before `backward()`, as the lab did: two plans.
+//   also-read   `optimizer.step({ alsoRead: [loss] })` reads the loss in the update's plan: one plan.
 //
 // The scenarios:
 //   step    one MNIST training step of `examples/mnist` (zeroGrad, forward, loss, backward, Adam) on a
 //           batch of 64 images: the median time of `--steps` steps after `--warmup` steps.
+//   cnn     the same step on a small convolutional model (Conv2d, ReLU, MaxPool2d, Flatten, Linear) on
+//           a batch of 64 images of 28 x 28 x 1, with the same timing.
 //   chain   `relu((a + b) * c)` over `--length` elements, read back whole: the median time.
+//   optimizer  the time of `optimizer.step()` alone (Adam on the same model): the median of `--steps`
+//           steps after `--warmup` steps. The forward and backward pass are outside the clock, and the
+//           clock stops when the queue has finished the step.
 //   counts  the dispatches and the submissions for one `data()` of the chain, of a dense layer, of the
 //           forward pass of the MNIST model, and of its backward pass (four `data()` calls, and the
 //           one `step()` of an optimizer). No time.
@@ -32,6 +41,7 @@ const { values: flags } = parseArgs({
     device: { type: "string", default: "webgpu" },
     hardware: { type: "boolean", default: false },
     scenario: { type: "string", default: "step" },
+    loop: { type: "string", default: "read-first" },
     length: { type: "string", default: "1048576" },
   },
 });
@@ -42,6 +52,7 @@ async function measure({
   warmup,
   device: preference,
   scenario,
+  loop,
   length,
   hardware,
 }) {
@@ -66,7 +77,15 @@ async function measure({
     adapterInfo = description;
   }
   const nn = await import("/dist/index.js");
-  const device = await nn.device(preference);
+  // The optimizer scenario makes the GPUDevice itself, so that it can wait for the queue to finish
+  // the work of a step: a step with no read-back returns before the device has run it.
+  const gpuDevice =
+    scenario === "optimizer"
+      ? await (await navigator.gpu.requestAdapter()).requestDevice()
+      : undefined;
+  const device = await nn.device(
+    gpuDevice ? { device: preference, gpuDevice } : preference,
+  );
   // The calls the device is given while `run` runs.
   const counted = async (run) => {
     const { submit } = GPUQueue.prototype;
@@ -104,11 +123,20 @@ async function measure({
       new nn.Dropout(0.2),
       new nn.Linear(128, 10, { seed: 202, weightScale: 1 / Math.sqrt(128) }),
     ).to(device);
+  // The small convolutional model of the `cnn` scenario.
+  const convolutional = () =>
+    new nn.Sequential(
+      new nn.Conv2d(1, 8, { kernelSize: 3, seed: 5 }),
+      new nn.ReLU(),
+      new nn.MaxPool2d({ filterSize: 2 }),
+      new nn.Flatten(),
+      new nn.Linear(13 * 13 * 8, 10, { seed: 6 }),
+    ).to(device);
   const images = Float32Array.from({ length: 64 * 784 }, next);
   const labels = Array.from({ length: 64 }, (_, row) => row % 10);
-  const lossOf = (model) =>
+  const lossOf = (model, shape = [64, 1, 28, 28]) =>
     new nn.CrossEntropyLoss().forward(
-      model.forward(device.tensor(images, { shape: [64, 1, 28, 28] })),
+      model.forward(device.tensor(images, { shape })),
       labels,
     );
   try {
@@ -152,16 +180,32 @@ async function measure({
         await y.disposeGraph([a, b, c]);
       };
     } else {
-      const model = mnist();
+      const cnn = scenario === "cnn";
+      const model = cnn ? convolutional() : mnist();
+      const shape = cnn ? [64, 28, 28, 1] : [64, 1, 28, 28];
       parameters = model.parameters();
       const optimizer = nn.optim.Adam(parameters, { lr: 0.001 });
       step = async () => {
         await optimizer.zeroGrad();
-        const loss = lossOf(model);
+        const loss = lossOf(model, shape);
+        if (loop === "also-read") {
+          await loss.backward();
+          const start = performance.now();
+          await optimizer.step({ alsoRead: [loss] });
+          if (gpuDevice) await gpuDevice.queue.onSubmittedWorkDone();
+          const elapsed = performance.now() - start;
+          await loss.disposeGraph(parameters);
+          return scenario === "optimizer" ? elapsed : undefined;
+        }
         await loss.data();
         await loss.backward();
+        // The optimizer alone is timed in the `optimizer` scenario: the rest is outside the clock.
+        const start = performance.now();
         await optimizer.step();
+        if (gpuDevice) await gpuDevice.queue.onSubmittedWorkDone();
+        const elapsed = performance.now() - start;
         await loss.disposeGraph(parameters);
+        return scenario === "optimizer" ? elapsed : undefined;
       };
     }
     for (let i = 0; i < warmup; i++) await step();
@@ -169,8 +213,8 @@ async function measure({
     const times = [];
     for (let i = 0; i < steps; i++) {
       const start = performance.now();
-      await step();
-      times.push(performance.now() - start);
+      const elapsed = await step();
+      times.push(elapsed ?? performance.now() - start);
     }
     const sorted = [...times].sort((p, q) => p - q);
     const median =
@@ -199,6 +243,7 @@ const { result } = await inPage(
     warmup: Number(flags.warmup),
     device: flags.device,
     scenario: flags.scenario,
+    loop: flags.loop,
     length: Number(flags.length),
     hardware: flags.hardware,
   },
@@ -215,7 +260,7 @@ if (flags.scenario === "counts") {
   console.log(JSON.stringify({ dist, ...result }));
 } else {
   console.log(
-    `${flags.scenario === "chain" ? `chain of ${flags.length} elements` : "MNIST training step, batch 64"}, ${flags.steps} runs after ${flags.warmup} warm-up runs, on ${result.backend.name} (${flags.hardware ? result.adapterInfo : "SwiftShader"}), build ${dist}`,
+    `${flags.scenario === "chain" ? `chain of ${flags.length} elements` : flags.scenario === "cnn" ? "CNN training step, batch 64" : "MNIST training step, batch 64"}, loop ${flags.loop}, ${flags.steps} runs after ${flags.warmup} warm-up runs, on ${result.backend.name} (${flags.hardware ? result.adapterInfo : "SwiftShader"}), build ${dist}`,
   );
   console.log(
     `median ${result.medianMs.toFixed(1)} ms, least ${result.minMs.toFixed(1)} ms, most ${result.maxMs.toFixed(1)} ms; the device was given ${result.seen.dispatches} dispatches in ${result.seen.submissions} submissions for one run`,

@@ -1,14 +1,7 @@
 import { Tensor } from "../../tensor/tensor.js";
 import type { Device } from "../../runtime/device.js";
 import { Module } from "../module.js";
-
-function random(seed: number): () => number {
-  let state = seed >>> 0;
-  return () => {
-    state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
-    return state / 0x100000000;
-  };
-}
+import { random } from "../random.js";
 
 export interface LinearOptions {
   readonly seed?: number;
@@ -17,7 +10,13 @@ export interface LinearOptions {
 }
 
 export class Linear extends Module {
+  /**
+   * The host copy of the weights, row-major `[inFeatures, outFeatures]`. An optimizer updates the
+   * parameter on the device, so this array holds the trained values only after `Module.sync()`,
+   * after `Trainer.fit()`, or after a read of the parameter (`parameterValues()`, `data()`).
+   */
   readonly weight: Float32Array;
+  /** The host copy of the biases. It is refreshed like `weight`. */
   readonly bias: Float32Array;
   private readonly deviceTensors = new WeakMap<
     Device,

@@ -58,7 +58,7 @@ await device.dispose();`;
     </section>
 
     <section class="home-status" aria-labelledby="status-title">
-      <div><p class="eyebrow">Current implementation</p><h2 id="status-title">Every op is a kernel function. Training is not tuned yet.</h2><p>Each <code>data()</code> runs as one TypeShade fuse scope, and <code>device.lastReport</code> shows its plan. Optimizers still update host arrays, so Adam is not a device kernel and tiled MatMul remains future work.</p></div>
+      <div><p class="eyebrow">Current implementation</p><h2 id="status-title">Every op is a kernel function. Training is not tuned yet.</h2><p>Each <code>data()</code> runs as one TypeShade fuse scope, and <code>device.lastReport</code> shows its plan. SGD and Adam update the parameters on the device. Tiled MatMul remains future work.</p></div>
       <a class="button button-quiet" href="https://github.com/typeshade/typenn/blob/main/TODO.md">Read implementation status <span aria-hidden="true">↗</span></a>
     </section>
   </div>

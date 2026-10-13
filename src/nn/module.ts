@@ -36,6 +36,18 @@ export abstract class Module {
     ];
   }
 
+  /**
+   * Refresh the host arrays of every layer in this module. The optimizers update the parameters
+   * on the device, so a layer's `weight` and `bias` arrays are host copies that lag behind
+   * until `sync()` (or `Trainer.fit()`) reads the parameters back, in one plan. Does nothing
+   * before `to(device)`, or when no parameter has changed on the device.
+   */
+  async sync(): Promise<void> {
+    if (!this.device) return;
+    const stale = this.parameters().filter((parameter) => parameter.hostStale);
+    if (stale.length > 0) await this.device.materializeAll(stale);
+  }
+
   protected ownParameters(_device: Device): readonly Tensor[] {
     return [];
   }

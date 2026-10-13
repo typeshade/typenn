@@ -10,14 +10,23 @@ after(closeNn);
 
 /** Run `body` on a TypeNN device over a fake WebGPU device, and dispose of both. */
 async function onFakeGpu(body, options = {}) {
-  const gpu = fakeGpu(options);
-  const device = await nn.device({ device: "webgpu", gpuDevice: gpu.device });
+  const { poolBytes, ...gpuOptions } = options;
+  const gpu = fakeGpu(gpuOptions);
+  const device = await nn.device({
+    device: "webgpu",
+    gpuDevice: gpu.device,
+    ...(poolBytes === undefined ? {} : { poolBytes }),
+  });
   try {
     await body(device, gpu);
   } finally {
     await device.dispose();
   }
 }
+
+/** The exact count of arrays below is the count without the pool, which frees each array at once. */
+const onFakeGpuUnpooled = (body, options = {}) =>
+  onFakeGpu(body, { ...options, poolBytes: 0 });
 
 const vector = (device, values) =>
   device.tensor(values, { shape: [values.length] });
@@ -68,7 +77,8 @@ test("a plan that fails leaves no array behind, and the same read runs again", a
 });
 
 test("a training step leaves no array behind", async () => {
-  await onFakeGpu(async (device, gpu) => {
+  // poolBytes: 0, because this test counts the live arrays, and the pool keeps the released ones.
+  await onFakeGpuUnpooled(async (device, gpu) => {
     const model = new nn.Sequential(
       new nn.Flatten(),
       new nn.Linear(16, 8, { seed: 1 }),
@@ -100,8 +110,8 @@ test("a training step leaves no array behind", async () => {
       `live buffers after each step: ${counts}`,
     );
     await optimizer.zeroGrad();
-    // Four parameters, and nothing else.
-    assert.equal(live(), 4);
+    // Four parameters, and the two moments of each on the device, and nothing else.
+    assert.equal(live(), 4 + 2 * 4);
   });
   // A disposed device has freed everything it made.
   const gpu = fakeGpu();

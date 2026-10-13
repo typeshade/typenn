@@ -3,7 +3,7 @@ import ThemeControl from "../components/ThemeControl";
 import "../styles/global.css";
 
 type Locale = "en" | "ko";
-type PageKey = "home" | "start" | "guide" | "execution" | "training" | "api" | "playground" | "examples";
+type PageKey = "home" | "start" | "guide" | "execution" | "training" | "api" | "playground" | "lab" | "examples";
 
 interface Props {
   locale: Locale;
@@ -21,21 +21,23 @@ const links: { key: PageKey; en: string; ko: string; enHref: string; koHref: str
   { key: "training", en: "Training", ko: "모델 학습", enHref: "/guide/training/", koHref: "/ko/guide/training/" },
   { key: "api", en: "API reference", ko: "API 참조", enHref: "/api/", koHref: "/ko/api/" },
   { key: "playground", en: "Playground", ko: "직접 실행", enHref: "/playground/", koHref: "/ko/playground/" },
+  { key: "lab", en: "Lab", ko: "실습", enHref: "/lab/", koHref: "/ko/lab/" },
   { key: "examples", en: "Examples", ko: "예제", enHref: "/examples/", koHref: "/ko/examples/" },
 ];
-const canonicalUrl = `https://typenn.typeshade.dev${Astro.url.pathname}`;
+const siteUrl = (path: string) => new URL(path, Astro.site).href;
+const canonicalUrl = siteUrl(Astro.url.pathname);
 const alternatePath = ko ? Astro.url.pathname.replace(/^\/ko(?=\/|$)/, "") || "/" : `/ko${Astro.url.pathname === "/" ? "/" : Astro.url.pathname}`;
 const alternateLabel = ko ? "English" : "한국어";
 const sidebarGroups = ko
   ? [
       { title: "시작", keys: ["start"] as PageKey[] },
       { title: "가이드", keys: ["execution", "training"] as PageKey[] },
-      { title: "참조와 실습", keys: ["api", "playground", "examples"] as PageKey[] },
+      { title: "참조와 실습", keys: ["api", "playground", "lab", "examples"] as PageKey[] },
     ]
   : [
       { title: "Start here", keys: ["start"] as PageKey[] },
       { title: "Guides", keys: ["execution", "training"] as PageKey[] },
-      { title: "Reference & practice", keys: ["api", "playground", "examples"] as PageKey[] },
+      { title: "Reference & practice", keys: ["api", "playground", "lab", "examples"] as PageKey[] },
     ];
 ---
 
@@ -48,9 +50,9 @@ const sidebarGroups = ko
     <link rel="icon" href="/mark.svg" type="image/svg+xml" />
     <meta name="theme-color" content="#f5f5f5" />
     <link rel="canonical" href={canonicalUrl} />
-    <link rel="alternate" hreflang="en" href={`https://typenn.typeshade.dev${ko ? alternatePath : Astro.url.pathname}`} />
-    <link rel="alternate" hreflang="ko" href={`https://typenn.typeshade.dev${ko ? Astro.url.pathname : alternatePath}`} />
-    <link rel="alternate" hreflang="x-default" href={`https://typenn.typeshade.dev${ko ? alternatePath : Astro.url.pathname}`} />
+    <link rel="alternate" hreflang="en" href={siteUrl(ko ? alternatePath : Astro.url.pathname)} />
+    <link rel="alternate" hreflang="ko" href={siteUrl(ko ? Astro.url.pathname : alternatePath)} />
+    <link rel="alternate" hreflang="x-default" href={siteUrl(ko ? alternatePath : Astro.url.pathname)} />
     <title>{title}</title>
   </head>
   <body>
@@ -62,8 +64,8 @@ const sidebarGroups = ko
           <span>TypeNN</span>
         </a>
         <nav class="top-nav" aria-label={ko ? "주 메뉴" : "Primary navigation"}>
-          {links.filter((item) => ["start", "api", "playground", "examples"].includes(item.key)).map((item) => (
-            <a class:list={["top-link", active === item.key && "is-active", item.key === "playground" && "nav-cta"]}
+          {links.filter((item) => ["start", "api", "playground", "lab", "examples"].includes(item.key)).map((item) => (
+            <a class:list={["top-link", active === item.key && "is-active"]}
               href={ko ? item.koHref : item.enHref} aria-current={active === item.key ? "page" : undefined}>
               {ko ? item.ko : item.en}
             </a>
@@ -76,7 +78,7 @@ const sidebarGroups = ko
       </div>
     </header>
 
-    <div class:list={["page-frame", active === "home" && "home-frame", active === "playground" && "playground-frame"]}>
+    <div class:list={["page-frame", active === "home" && "home-frame", (active === "playground") && "playground-frame"]}>
       {active !== "home" && (
         <aside class="docs-sidebar" aria-label={ko ? "문서 탐색" : "Documentation navigation"}>
           <a class="sidebar-home" href={ko ? "/ko/" : "/"}>{ko ? "TypeNN 문서" : "TypeNN docs"}</a>

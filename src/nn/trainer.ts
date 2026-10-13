@@ -84,6 +84,11 @@ export class Trainer {
       };
     };
 
+    // The optimizer updates the parameters on the device. The layer's host arrays, which the
+    // parameters share, take the trained values once, when the fit ends.
+    const syncHost = () =>
+      Promise.all([weight.parameterValues(), bias.parameterValues()]);
+
     try {
       for (let epoch = 1; epoch <= options.epochs; epoch++) {
         for (
@@ -130,7 +135,12 @@ export class Trainer {
         history.push(metrics);
         options.onEpoch?.(metrics);
       }
+      await syncHost();
       return history;
+    } catch (error) {
+      // A failed fit keeps the steps it made: the host arrays take them, as after a complete fit.
+      await syncHost().catch(() => undefined);
+      throw error;
     } finally {
       this.fitting = false;
     }
