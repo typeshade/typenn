@@ -72,6 +72,13 @@ async function measure(arg) {
   const device = await nn.device("webgpu");
   const samples = [];
   try {
+    // A device that fell back to another tier measures that tier, so it is refused here.
+    if (device.backend.name !== "webgpu")
+      throw new Error(
+        `The WebGPU tier was requested, but the device runs on ${device.backend.name}: ` +
+          JSON.stringify(device.backend),
+      );
+
     for (const axisSize of arg.sizes) {
       const count = arg.rows * axisSize;
       const input = device.tensor(
@@ -131,7 +138,7 @@ async function measure(arg) {
   } finally {
     await device.dispose();
   }
-  return { gpu, software, samples };
+  return { backend: device.backend.name, gpu, software, samples };
 }
 
 const dist = resolve(flags.dist);
