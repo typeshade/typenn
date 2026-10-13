@@ -32,6 +32,7 @@ from __future__ import annotations
 import argparse
 import gzip
 import hashlib
+import http.client
 import io
 import json
 import os
@@ -39,8 +40,11 @@ import pickle
 import struct
 import sys
 import tarfile
+import time
+import urllib.error
 import urllib.request
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
 
 import numpy as np
@@ -172,25 +176,56 @@ def sha256_file(path: str) -> str:
 
 
 DOWNLOAD_ATTEMPTS = 3
+READ_TIMEOUT = 60  # seconds without a byte before a read fails
+PROGRESS_STEP = 10 * 1024 * 1024  # print progress every 10 MiB
+MIB = 1024 * 1024
+
+
+def _copy(response, partial: str, mode: str, name: str, start: int) -> None:
+    """Copy the response into `partial`, printing progress every PROGRESS_STEP bytes."""
+    began = time.monotonic()
+    received = 0
+    reported = start // PROGRESS_STEP
+    with open(partial, mode) as out:
+        while True:
+            block = response.read(1 << 20)
+            if not block:
+                break
+            out.write(block)
+            received += len(block)
+            total = start + received
+            if total // PROGRESS_STEP > reported:
+                reported = total // PROGRESS_STEP
+                rate = received / max(time.monotonic() - began, 1e-9) / 1024
+                print(f"  {name}: {total / MIB:.1f} MiB at {rate:.0f} KiB/s", flush=True)
+    print(f"  {name}: {(start + received) / MIB:.1f} MiB received", flush=True)
 
 
 def download(name: str, url: str, path: str) -> None:
-    """Download one source to `path`. A failed transfer is retried, up to DOWNLOAD_ATTEMPTS times."""
+    """Download one source to `path`, resuming a kept `.part` file with an HTTP Range request.
+
+    A failed transfer keeps its `.part` file, so the next attempt resumes where it stopped. A
+    server that answers 200 instead of 206 sent the whole file, so the partial restarts. A 416
+    means the partial is not a prefix of the source: it is deleted and the attempt starts over.
+    """
     partial = path + ".part"
     for attempt in range(1, DOWNLOAD_ATTEMPTS + 1):
-        print(f"  download {name} (attempt {attempt}/{DOWNLOAD_ATTEMPTS})", flush=True)
+        offset = os.path.getsize(partial) if os.path.exists(partial) else 0
+        print(f"  download {name} (attempt {attempt}/{DOWNLOAD_ATTEMPTS}, from byte {offset})", flush=True)
+        headers = {"User-Agent": "typenn-site-datasets/1"}
+        if offset:
+            headers["Range"] = f"bytes={offset}-"
         try:
-            request = urllib.request.Request(url, headers={"User-Agent": "typenn-site-datasets/1"})
-            with urllib.request.urlopen(request, timeout=120) as response, open(partial, "wb") as out:
-                while True:
-                    block = response.read(1 << 20)
-                    if not block:
-                        break
-                    out.write(block)
+            request = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(request, timeout=READ_TIMEOUT) as response:
+                resumed = response.status == 206
+                if offset and not resumed:
+                    print(f"  {name}: the server sent the whole file; restarting", flush=True)
+                _copy(response, partial, "ab" if resumed else "wb", name, offset if resumed else 0)
             os.replace(partial, path)
             return
-        except OSError as error:  # URLError, HTTPError, timeouts and socket resets
-            if os.path.exists(partial):
+        except (OSError, http.client.HTTPException) as error:  # URLError, HTTPError, timeouts, resets, short reads
+            if isinstance(error, urllib.error.HTTPError) and error.code == 416 and os.path.exists(partial):
                 os.remove(partial)
             if attempt == DOWNLOAD_ATTEMPTS:
                 raise SystemExit(f"download of {name} failed {DOWNLOAD_ATTEMPTS} times: {error}") from error
@@ -671,6 +706,32 @@ def finish(dataset: str, manifest: dict, writer: Writer, out: str) -> dict:
     }
 
 
+# The source files each dataset reads, so main can download them concurrently.
+DATASET_SOURCES = {
+    "mnist": ["mnist.npz"],
+    "fashion_mnist": [
+        "train-labels-idx1-ubyte.gz", "train-images-idx3-ubyte.gz",
+        "t10k-labels-idx1-ubyte.gz", "t10k-images-idx3-ubyte.gz",
+    ],
+    "cifar10": ["cifar-10-binary.tar.gz"],
+    "cifar100": ["cifar-100-binary.tar.gz"],
+    "imdb": ["imdb.npz", "imdb_word_index.json"],
+    "reuters": ["reuters.npz", "reuters_word_index.json"],
+    "california_housing": ["california_housing.npz"],
+}
+PREFETCH_WORKERS = 4
+
+
+def prefetch(ids: list[str], cache: str) -> None:
+    """Download and verify the source files of all requested datasets, PREFETCH_WORKERS at a time."""
+    names = sorted({name for dataset in ids for name in DATASET_SOURCES[dataset]})
+    print(f"sources ({len(names)} files, {PREFETCH_WORKERS} at a time)", flush=True)
+    with ThreadPoolExecutor(max_workers=PREFETCH_WORKERS) as pool:
+        futures = [pool.submit(fetch, name, cache) for name in names]
+        for future in futures:
+            future.result()  # re-raises the SystemExit of a failed source
+
+
 BUILDERS = {
     "mnist": build_mnist,
     "fashion_mnist": build_fashion,
@@ -697,6 +758,7 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(f"unknown dataset ids: {', '.join(unknown)}")
     os.makedirs(args.cache, exist_ok=True)
     os.makedirs(args.out, exist_ok=True)
+    prefetch(ids, args.cache)
 
     entries = []
     for dataset in ids:
