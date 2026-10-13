@@ -1,13 +1,15 @@
 import {
   logSoftmax,
-  logSoftmaxFromLogSumExp,
+  logSoftmaxFromStatistics,
   logSoftmaxGrad,
+  logSoftmaxGradFromReduction,
+  logSoftmaxGradReduction,
   softmax as softmaxKernel,
-  softmaxFromLogSumExp,
+  softmaxFromStatistics,
   softmaxGrad,
   softmaxGradFromReduction,
   softmaxGradReduction,
-  softmaxLogSumExp,
+  softmaxStatistics,
 } from "../../kernels/softmax.shade.ts";
 import { sizeOf } from "../shape.js";
 import type { Tensor } from "../tensor.js";
@@ -40,11 +42,12 @@ export function softmax(
   const axisSize = input.shape[normalizedAxis]!;
   const inner = sizeOf(input.shape.slice(normalizedAxis + 1));
   const twoPass = axisSize >= TWO_PASS_MIN_AXIS;
+  // Two entries per slice: the peak, then the sum of exp(x - peak).
   const statistics = twoPass
     ? operation(
-        [sizeOf(input.shape) / axisSize],
-        "softmaxLogSumExp",
-        softmaxLogSumExp,
+        [(2 * sizeOf(input.shape)) / axisSize],
+        "softmaxStatistics",
+        softmaxStatistics,
         [input],
         [axisSize, inner],
       )
@@ -55,8 +58,8 @@ export function softmax(
     op,
     twoPass
       ? op === "softmax"
-        ? softmaxFromLogSumExp
-        : logSoftmaxFromLogSumExp
+        ? softmaxFromStatistics
+        : logSoftmaxFromStatistics
       : op === "softmax"
         ? softmaxKernel
         : logSoftmax,
@@ -74,20 +77,20 @@ export function softmax(
           ),
         ];
 
-      const weighted = op === "softmax" ? 1 : 0;
+      const softmaxPath = op === "softmax";
       const reduced = operation(
         [sizeOf(input.shape) / axisSize],
-        "softmaxGradReduction",
-        softmaxGradReduction,
-        [value, upstream],
-        [axisSize, inner, weighted],
+        softmaxPath ? "softmaxGradReduction" : "logSoftmaxGradReduction",
+        softmaxPath ? softmaxGradReduction : logSoftmaxGradReduction,
+        softmaxPath ? [value, upstream] : [upstream],
+        [axisSize, inner],
       );
       const gradient = operation(
         input.shape,
         "softmaxGrad",
-        softmaxGradFromReduction,
+        softmaxPath ? softmaxGradFromReduction : logSoftmaxGradFromReduction,
         [value, upstream, reduced],
-        [axisSize, inner, weighted],
+        [axisSize, inner],
       );
       // Statistics are a forward-only cache, not another differentiable input.
       return [gradient, undefined];

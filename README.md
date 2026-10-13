@@ -158,16 +158,16 @@ The kernel functions are in `src/kernels`. Each is an exported TypeShade functio
 `kernel(out, ...arrays, ...values)`. `out` and the arrays are `Resident` arrays. The scalars and the
 fixed-size arrays follow them, by value. `vite.config.ts` builds them with `typeshade({ fuse: true })`.
 
-| File               | Kernel functions                                                                                                                                              |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `map.shade.ts`     | `copy`, `relu`, `reluGrad`, and the maps `<operation>Map` such as `absMap`, `expMap` and `sigmoidMap`                                                         |
-| `binary.shade.ts`  | `add`, `sub`, `mul`, `div`, `maximum`, `minimum`, `power` and `prelu` for equal shapes, their `Expand` and `Strided` forms for broadcasting, and `binaryGrad` |
-| `reduce.shade.ts`  | `sumAxis`, `meanAxis`, `prodAxis`, `maxAxis`, `minAxis`, `argMaxAxis`, `argMinAxis` and `reduceGrad`                                                          |
-| `matmul.shade.ts`  | `matmul`                                                                                                                                                      |
-| `softmax.shade.ts` | `softmax`, `logSoftmax`, `softmaxGrad` and `logSoftmaxGrad`                                                                                                   |
-| `loss.shade.ts`    | `softmaxCrossEntropy`, `crossEntropyLogitsGrad` and `crossEntropyLabelsGrad`                                                                                  |
-| `conv.shade.ts`    | `conv2d`, `conv2dInputGrad` and `conv2dFilterGrad`                                                                                                            |
-| `pool.shade.ts`    | `maxPool`, `avgPool`, `maxPoolGrad` and `avgPoolGrad`                                                                                                         |
+| File               | Kernel functions                                                                                                                                                                                                                                          |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `map.shade.ts`     | `copy`, `relu`, `reluGrad`, and the maps `<operation>Map` such as `absMap`, `expMap` and `sigmoidMap`                                                                                                                                                     |
+| `binary.shade.ts`  | `add`, `sub`, `mul`, `div`, `maximum`, `minimum`, `power` and `prelu` for equal shapes, their `Expand` and `Strided` forms for broadcasting, and `binaryGrad`                                                                                             |
+| `reduce.shade.ts`  | `sumAxis`, `meanAxis`, `prodAxis`, `maxAxis`, `minAxis`, `argMaxAxis`, `argMinAxis` and `reduceGrad`                                                                                                                                                      |
+| `matmul.shade.ts`  | `matmul`                                                                                                                                                                                                                                                  |
+| `softmax.shade.ts` | `softmax`, `logSoftmax`, `softmaxGrad` and `logSoftmaxGrad`; `softmaxStatistics`, `softmaxFromStatistics` and `logSoftmaxFromStatistics`; `softmaxGradReduction`, `logSoftmaxGradReduction`, `softmaxGradFromReduction` and `logSoftmaxGradFromReduction` |
+| `loss.shade.ts`    | `softmaxCrossEntropy`, `crossEntropyLogitsGrad` and `crossEntropyLabelsGrad`                                                                                                                                                                              |
+| `conv.shade.ts`    | `conv2d`, `conv2dInputGrad` and `conv2dFilterGrad`                                                                                                                                                                                                        |
+| `pool.shade.ts`    | `maxPool`, `avgPool`, `maxPoolGrad` and `avgPoolGrad`                                                                                                                                                                                                     |
 
 `add(out, a, b)` reads `a[i]` and `b[i]` and writes `out[i]`. `addExpand` reads `b` through the
 strides of the broadcast, and `addStrided` reads both operands that way.

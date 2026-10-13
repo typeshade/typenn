@@ -277,7 +277,7 @@ test("long-axis softmax reduces normalization once per slice, not once per outpu
     const y = x.softmax(1);
     await y.data();
     const calls = device.lastReport.groups.flatMap((group) => group.calls);
-    assert.deepEqual(calls, ["softmaxLogSumExp", "softmaxFromLogSumExp"]);
+    assert.deepEqual(calls, ["softmaxStatistics", "softmaxFromStatistics"]);
     assert.equal(device.lastReport.dispatches, 2);
 
     const upstream = device.tensor(new Float32Array(2 * 129 * 3), {
@@ -290,6 +290,29 @@ test("long-axis softmax reduces normalization once per slice, not once per outpu
       "softmaxGradReduction",
       "softmaxGradFromReduction",
     ]);
+  });
+});
+
+test("long-axis log softmax uses its own per-slice gradient reduction", async () => {
+  await onFakeGpu(async (device) => {
+    const x = device.tensor(new Float32Array(2 * 129 * 3), {
+      shape: [2, 129, 3],
+    });
+    const y = x.logSoftmax(1);
+    await y.data();
+    assert.deepEqual(
+      device.lastReport.groups.flatMap((group) => group.calls),
+      ["softmaxStatistics", "logSoftmaxFromStatistics"],
+    );
+    const upstream = device.tensor(new Float32Array(2 * 129 * 3), {
+      shape: [2, 129, 3],
+    });
+    const [gradient] = nn.gradients(y, [x], upstream);
+    await gradient.data();
+    assert.deepEqual(
+      device.lastReport.groups.flatMap((group) => group.calls),
+      ["logSoftmaxGradReduction", "logSoftmaxGradFromReduction"],
+    );
   });
 });
 
