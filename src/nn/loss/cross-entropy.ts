@@ -1,4 +1,4 @@
-import type { Tensor } from "../../tensor/tensor.js";
+import { Tensor } from "../../tensor/tensor.js";
 
 export interface CrossEntropyOptions {
   readonly reduction?: "none" | "sum" | "mean";
@@ -12,11 +12,26 @@ export class CrossEntropyLoss {
     this.reduction = options.reduction ?? "mean";
   }
 
-  forward(logits: Tensor, labels: ArrayLike<number>): Tensor {
+  /**
+   * The loss of `logits` (rank 2, `[batch, classes]`). `labels` is the class of each row: an array of
+   * integers, or a device Tensor of shape `[batch]` holding the class ids as f32 values (for example
+   * a `DeviceDataset` batch). Both give the same value and gradients.
+   */
+  forward(logits: Tensor, labels: ArrayLike<number> | Tensor): Tensor {
     logits.assertUsable();
     if (logits.shape.length !== 2)
       throw new RangeError("CrossEntropyLoss expects rank-2 logits.");
     const [batch, classes] = logits.shape;
+    if (labels instanceof Tensor) {
+      labels.assertUsable();
+      if (labels.shape.length !== 1 || labels.shape[0] !== batch)
+        throw new RangeError(
+          "CrossEntropyLoss label Tensor must have shape [batch].",
+        );
+      return logits.sparseSoftmaxCrossEntropyWithLogits(labels, {
+        reduction: this.reduction,
+      });
+    }
     if (labels.length !== batch)
       throw new RangeError(
         "CrossEntropyLoss label count must match the batch.",

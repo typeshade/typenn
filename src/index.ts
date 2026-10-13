@@ -133,3 +133,13 @@ export {
   tan,
   floor,
 } from "./nn/ops.js";
+export {
+  DeviceDataset,
+  type DatasetInputs,
+  type DatasetSplit,
+  type DeviceBatch,
+  type DeviceDatasetOptions,
+  type Residency,
+  type SourceArray,
+} from "./data/device-dataset.js";
+export { DEFAULT_SHARD_BYTES } from "./data/shards.js";

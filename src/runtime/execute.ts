@@ -82,7 +82,12 @@ async function plan(pending: readonly Tensor[], memory: Memory): Promise<void> {
           const id = graphId(tensor);
           const inputs = distinct(scope, node.inputs, () => nodes.push(id));
           nodes.push(id);
-          node.kernel(tensor.storage, ...inputs, ...node.values);
+          node.kernel(
+            tensor.storage,
+            ...inputs,
+            ...(node.arrays ?? []),
+            ...node.values,
+          );
         }
       }),
       nodes,

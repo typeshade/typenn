@@ -20,7 +20,10 @@ import {
   matmul,
   type MatmulOptions,
 } from "./operations/linear-algebra.js";
-import { softmaxCrossEntropyWithLogits } from "./operations/loss.js";
+import {
+  softmaxCrossEntropyWithLogits,
+  sparseSoftmaxCrossEntropyWithLogits,
+} from "./operations/loss.js";
 import { softmax } from "./operations/normalization.js";
 import { reduce } from "./operations/reductions.js";
 import { reshape } from "./operations/shape.js";
@@ -234,6 +237,14 @@ export class Tensor {
     options: { readonly reduction?: "none" | "sum" | "mean" } = {},
   ): Tensor {
     return softmaxCrossEntropyWithLogits(this, labels, options);
+  }
+
+  /** Cross entropy of these logits and one f32 class id per row (see the operations file). */
+  sparseSoftmaxCrossEntropyWithLogits(
+    classes: Tensor,
+    options: { readonly reduction?: "none" | "sum" | "mean" } = {},
+  ): Tensor {
+    return sparseSoftmaxCrossEntropyWithLogits(this, classes, options);
   }
 
   sum(axis?: number): Tensor {
