@@ -314,3 +314,22 @@ the source for bounds and index calculations is open.
 
 - [ ] Review the 85 kernel functions for bounds, index calculations and naming, as the earlier review did for its files.
 - [ ] Run the numerics cases and benchmark representative shapes on a hardware GPU.
+
+## Device-resident datasets
+
+Status: in progress (branch `claude/typenn-device-dataset`, based on `main` 11bdce1, TypeShade pin 96dbaa9).
+
+Goal: upload a dataset to the device once, and build every training and evaluation batch on the
+device. A training step uploads no sample bytes and does no per-sample CPU work.
+
+- [ ] Public API under the `nn` namespace: a dataset object for images, tabular, text
+      bag-of-words and labels (u8, u16, u32 and f32 regression targets).
+- [ ] Storage keeps the source dtype on the device: u8 packed 4 per u32 word, u16 2 per word.
+- [ ] Batches from a device-resident permutation, one N-element u32 upload per epoch.
+- [ ] Evaluation iterator over the test split in order.
+- [ ] CrossEntropyLoss and MSELoss accept a device label or target Tensor.
+- [ ] Sharding for sources above the storage binding limit (128 MiB default).
+- [ ] Residency report (`residency`) with a reason when a tier cannot hold a source.
+- [ ] `dispose()` and a `bytes` property, with a clear error after dispose.
+- [ ] Parity tests against the host batch helpers (CPU tier and fake GPU), and a GPU test.
+- [ ] README section and JSDoc on every export.
