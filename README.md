@@ -342,6 +342,13 @@ npm run build
 TYPESHADE_CHROMIUM=/path/to/chrome node scripts/bench-softmax.mjs --hardware
 ```
 
+To measure the complete MNIST training step (forward, backward, Adam and
+readback) on native hardware rather than on SwiftShader:
+
+```sh
+TYPESHADE_CHROMIUM=/path/to/chrome node scripts/bench-step.mjs --scenario step --hardware
+```
+
 The benchmark refuses an identified software/fallback adapter under
 `--hardware`. It reports the adapter identity, operation, axis length,
 dispatch count and end-to-end readback-inclusive timings. To compare a
