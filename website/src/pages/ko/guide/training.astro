@@ -1,0 +1,60 @@
+---
+import SiteLayout from "../../../layouts/SiteLayout.astro";
+import CodeBlock from "../../../components/CodeBlock.astro";
+const code = `const model = new SimpleMLP().to(device);
+const parameters = model.parameters();
+const criterion = new nn.CrossEntropyLoss();
+const optimizer = nn.optim.Adam(parameters, { lr: 0.001 });
+
+model.train();
+let totalLoss = 0;
+let totalSamples = 0;
+for await (const batch of new DataLoader(trainData, 64, true)) {
+  await optimizer.zeroGrad();
+  const images = device.tensor(batch.images, {
+    shape: [batch.size, 1, 28, 28],
+  });
+  const logits = model.forward(images);
+  const loss = criterion.forward(logits, batch.labels);
+  const batchLoss = (await loss.data())[0];
+  if (batchLoss === undefined) throw new Error("CrossEntropyLoss returned no value.");
+  await loss.backward();
+  await optimizer.step();
+  totalLoss += batchLoss * batch.size;
+  totalSamples += batch.size;
+  await loss.disposeGraph(parameters);
+}`;
+const modelCode = `export class SimpleMLP extends nn.Module {
+  private readonly flatten: nn.Flatten;
+  private readonly fc1: nn.Linear;
+  private readonly relu: nn.ReLU;
+  private readonly dropout: nn.Dropout;
+  private readonly fc2: nn.Linear;
+
+  constructor() {
+    super();
+    this.flatten = this.register("flatten", new nn.Flatten());
+    this.fc1 = this.register("fc1", new nn.Linear(784, 128));
+    this.relu = this.register("relu", new nn.ReLU());
+    this.dropout = this.register("dropout", new nn.Dropout(0.2));
+    this.fc2 = this.register("fc2", new nn.Linear(128, 10));
+  }
+
+  forward(input: nn.Tensor): nn.Tensor {
+    return this.fc2.forward(this.dropout.forward(
+      this.relu.forward(this.fc1.forward(this.flatten.forward(input))),
+    ));
+  }
+}`;
+---
+<SiteLayout locale="ko" active="training" title="TypeNN 모델 학습" description="Module, Linear, CrossEntropyLoss, Tensor 자동 미분과 Adam으로 학습 루프를 구성합니다.">
+  <article class="docs-article">
+    <nav class="breadcrumbs" aria-label="Breadcrumb"><a href="/ko/">TypeNN</a><span>/</span><a href="/ko/guide/">가이드</a><span>/</span><span>모델 학습</span></nav>
+    <header class="page-heading"><p class="eyebrow">가이드</p><h1>모델 학습</h1><p class="lead">Module API에서 학습 루프는 명시적입니다. 기울기를 초기화하고 forward, 역전파, 파라미터 갱신을 실행한 뒤 배치 그래프를 해제합니다.</p></header>
+    <section class="doc-section"><h2>모델 정의</h2><p>MNIST 예제는 ReLU와 Dropout을 포함한 784 → 128 → 10 MLP를 사용합니다. 아래 코드는 seed 가중치 옵션을 줄인 실제 모델 소스 구조입니다.</p><CodeBlock title="MNIST 모델" file="examples/mnist/model.ts" code={modelCode} /></section>
+    <section class="doc-section"><h2>학습 루프</h2><p>아래 코드는 예제의 배치 수명주기를 따릅니다. 로깅할 loss 값을 명시적으로 읽은 다음 backward, Adam 갱신을 실행하고 임시 Tensor를 해제합니다.</p><CodeBlock title="Forward, backward, 갱신" file="examples/mnist/train.ts" code={code} /></section>
+    <section class="doc-section"><h2>GPU 실행 경로</h2><p>모든 계층에서 순전파와 역전파 연산은 TypeShade 커널 함수로 실행되고, <code>data()</code> 호출마다 fuse 범위 하나가 실행됩니다. 옵티마이저는 모든 파라미터의 기울기를 계획 하나로 읽어옵니다. SGD와 Adam은 모멘트 상태를 두고 호스트 배열에서 파라미터를 갱신하므로 학습 처리량은 아직 최적화되지 않았습니다.</p><div class="note"><strong>명시적으로 읽은 값은 호스트로 전달됩니다.</strong><span><code>loss.data()</code>와 <code>parameter.data()</code>는 CPU 결과를 요청합니다. 위 루프는 매 단계 전체 파라미터나 기울기 배열을 읽지 않습니다.</span></div></section>
+    <section class="doc-section"><h2>각 배치 그래프 해제</h2><p><code>disposeGraph(model.parameters())</code>는 모델 파라미터를 보존하고 임시 Tensor를 해제합니다. 학습 세션이 끝나고 대기 중 작업을 마친 다음 Device를 해제하세요.</p><p><a class="text-link" href="https://github.com/typeshade/typenn/tree/main/examples/mnist">MNIST 전체 예제 보기 ↗</a></p></section>
+    <section class="doc-section"><h2>현재 지원 범위</h2><p>Tensor 자동 미분은 선택된 연산을 지원합니다. Module 학습 예제를 현재 지원 범위로 보고, 임의 사용자 커널이나 모든 그래프 연산의 미분이 지원된다고 가정하지 마세요.</p><nav class="doc-pagination"><a href="/ko/guide/execution/"><small>이전</small><strong>실행 모델</strong></a><a href="/ko/api/"><small>다음</small><strong>API 참조</strong><span>→</span></a></nav></section>
+  </article>
+</SiteLayout>
