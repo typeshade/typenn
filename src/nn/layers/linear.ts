@@ -10,7 +10,13 @@ export interface LinearOptions {
 }
 
 export class Linear extends Module {
+  /**
+   * The host copy of the weights, row-major `[inFeatures, outFeatures]`. An optimizer updates the
+   * parameter on the device, so this array holds the trained values only after `Module.sync()`,
+   * after `Trainer.fit()`, or after a read of the parameter (`parameterValues()`, `data()`).
+   */
   readonly weight: Float32Array;
+  /** The host copy of the biases. It is refreshed like `weight`. */
   readonly bias: Float32Array;
   private readonly deviceTensors = new WeakMap<
     Device,

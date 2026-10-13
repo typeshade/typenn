@@ -225,7 +225,7 @@ needs a gradient rule and corresponding execution path before TypeNN can train a
 - [x] Add softmax/log-softmax gradient kernels to Tensor-graph autograd.
 - [ ] Add `prod`/`max`/`min` reduction gradients and special activation gradient rules.
 - [x] Connect `nn.softmaxCrossEntropyWithLogits()` and `sum`/`mean` reductions to Tensor-graph autograd.
-- [x] Add trainable graph parameters, accumulated `Tensor.backward()` gradients, `zeroGrad()`, and SGD/Adam optimizer objects. An optimizer reads all its gradients in one plan. Adam moments and parameter updates currently run on host arrays.
+- [x] Add trainable graph parameters, accumulated `Tensor.backward()` gradients, `zeroGrad()`, and SGD/Adam optimizer objects. SGD and Adam compute the gradients and update the parameters, and the Adam moments, on the device in one plan (`src/kernels/optim.shade.ts`); `Module.sync()` refreshes the host copies in the layers.
 - [ ] Use TypeShade `gradCheck` against its f64 CPU oracle for generated Shade derivatives.
 
 ## API and kernel implementation notes

@@ -23,7 +23,13 @@ export class Conv2d extends Module {
   readonly kernelSize: readonly [number, number];
   readonly strides: readonly [number, number];
   readonly padding: "same" | "valid";
+  /**
+   * The host copy of the filter, `[kh, kw, inChannels, outChannels]`. An optimizer updates the
+   * parameter on the device, so this array holds the trained values only after `Module.sync()`
+   * or after a read of the parameter (`parameterValues()`, `data()`).
+   */
   readonly weight: Float32Array;
+  /** The host copy of the biases, when the layer has them. It is refreshed like `weight`. */
   readonly bias?: Float32Array;
   private readonly deviceTensors = new WeakMap<
     Device,
