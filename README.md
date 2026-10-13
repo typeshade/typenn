@@ -325,6 +325,30 @@ The chain is faster after, in each round. Run `node scripts/bench-step.mjs --sce
 `--scenario chain` to repeat a row. `--dist <directory>` runs the script on the `dist` of another
 build.
 
+## Long-axis softmax and GPU performance
+
+A short softmax axis (fewer than 64 elements) uses a single kernel for each
+forward or gradient operation. Larger axes compute one normalization statistic
+per slice and then apply it to all elements, avoiding quadratic repeated
+normalization in the forward and backward passes. The crossover is provisional:
+two dispatches can be slower than one on a physical GPU for some shapes.
+
+The correctness tests use Chromium on **SwiftShader**, a software GPU. Do not
+treat their elapsed time as a hardware GPU benchmark. On a computer with a
+real GPU and a browser with native WebGPU support, run:
+
+```sh
+npm run build
+TYPESHADE_CHROMIUM=/path/to/chrome node scripts/bench-softmax.mjs --hardware
+```
+
+The benchmark refuses an identified software/fallback adapter under
+`--hardware`. It reports the adapter identity, operation, axis length,
+dispatch count and end-to-end readback-inclusive timings. To compare a
+previous build, point `--dist` to its compiled `dist` directory and run
+the same command with identical axis lengths. GPU timestamp measurements,
+hardware-tiled matmul and device-resident Adam updates are not implemented.
+
 ## Tests
 
 ```sh
