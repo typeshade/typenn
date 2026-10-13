@@ -64,7 +64,7 @@ const sidebarGroups = ko
         </a>
         <nav class="top-nav" aria-label={ko ? "주 메뉴" : "Primary navigation"}>
           {links.filter((item) => ["start", "api", "playground", "lab", "examples"].includes(item.key)).map((item) => (
-            <a class:list={["top-link", active === item.key && "is-active", item.key === "playground" && "nav-cta"]}
+            <a class:list={["top-link", active === item.key && "is-active"]}
               href={ko ? item.koHref : item.enHref} aria-current={active === item.key ? "page" : undefined}>
               {ko ? item.ko : item.en}
             </a>

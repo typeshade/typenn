@@ -145,7 +145,6 @@ export function inputSize(spec: ModelSpec): number {
 
 /** Build the preset model (not yet on a device). Layers take their seeds from `spec.seed`. */
 export function buildModel(spec: ModelSpec, nn: NN): Module {
-  const Conv2d = conv2dClass(nn);
   const seed = spec.seed;
   const linear = (input: number, output: number, k: number) =>
     new nn.Linear(input, output, {
@@ -172,12 +171,20 @@ export function buildModel(spec: ModelSpec, nn: NN): Module {
       ];
       const flat = 32 * Math.floor(height / 4) * Math.floor(width / 4);
       return new nn.Sequential(
-        new Conv2d(channels, 16, 3, seed + 1),
+        new nn.Conv2d(channels, 16, {
+          kernelSize: 3,
+          padding: "same",
+          seed: seed + 1,
+        }),
         new nn.ReLU(),
-        new (maxPool2dClass(nn))(),
-        new Conv2d(16, 32, 3, seed + 2),
+        new nn.MaxPool2d({ filterSize: 2 }),
+        new nn.Conv2d(16, 32, {
+          kernelSize: 3,
+          padding: "same",
+          seed: seed + 2,
+        }),
         new nn.ReLU(),
-        new (maxPool2dClass(nn))(),
+        new nn.MaxPool2d({ filterSize: 2 }),
         new nn.Flatten(),
         linear(flat, outputs, 3),
       );
@@ -317,6 +324,8 @@ export async function train(
       epochSamples += n;
       steps++;
       samples += n;
+      if (config.maxSteps !== undefined && steps >= config.maxSteps)
+        capped = true;
       const elapsed = (performance.now() - started) / 1000;
       hooks.onStep?.({
         epoch,
@@ -328,6 +337,7 @@ export async function train(
         graph: snapshot,
       });
       await YIELD();
+      if (capped) break;
     }
     const evaluated = await evaluate(
       model,
@@ -487,78 +497,4 @@ export async function predict(
   } finally {
     model.train();
   }
-}
-
-function conv2dClass(nn: NN) {
-  return class Conv2d extends nn.Module {
-    private readonly weight: Float32Array;
-    private readonly bias: Float32Array;
-    private readonly deviceTensors = new WeakMap<
-      object,
-      { weight: Tensor; bias: Tensor }
-    >();
-
-    constructor(
-      readonly inChannels: number,
-      readonly outChannels: number,
-      readonly kernelSize: number,
-      seed: number,
-    ) {
-      super();
-      const bound = 1 / Math.sqrt(kernelSize * kernelSize * inChannels);
-      const next = mulberry32(seed);
-      this.weight = Float32Array.from(
-        { length: kernelSize * kernelSize * inChannels * outChannels },
-        () => (next() * 2 - 1) * bound,
-      );
-      this.bias = new Float32Array(outChannels);
-    }
-
-    forward(input: Tensor): Tensor {
-      const { weight, bias } = this.tensors(input.device);
-      return input.conv2d(weight, { padding: "same" }).add(bias);
-    }
-
-    protected ownParameters(device: Device): readonly Tensor[] {
-      const { weight, bias } = this.tensors(device);
-      return [weight, bias];
-    }
-
-    private tensors(device: Device): { weight: Tensor; bias: Tensor } {
-      let params = this.deviceTensors.get(device);
-      if (!params) {
-        // The runtime creates trainable leaves with `createParameter`, as its own Linear does. The
-        // declarations do not export it (@internal), so the site reaches it through a narrow type.
-        const runtime = device as unknown as {
-          createParameter(
-            values: Float32Array,
-            options: { shape: number[] },
-          ): Tensor;
-        };
-        params = {
-          weight: runtime.createParameter(this.weight, {
-            shape: [
-              this.kernelSize,
-              this.kernelSize,
-              this.inChannels,
-              this.outChannels,
-            ],
-          }),
-          bias: runtime.createParameter(this.bias, {
-            shape: [this.outChannels],
-          }),
-        };
-        this.deviceTensors.set(device, params);
-      }
-      return params;
-    }
-  };
-}
-
-function maxPool2dClass(nn: NN) {
-  return class MaxPool2d extends nn.Module {
-    forward(input: Tensor): Tensor {
-      return input.maxPool({ filterSize: 2, strides: 2 });
-    }
-  };
 }

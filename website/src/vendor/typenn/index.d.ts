@@ -95,6 +95,42 @@ export class Linear extends Module {
 
 export class Dense extends Linear {}
 
+export interface Conv2dOptions {
+  readonly kernelSize: number | readonly [number, number];
+  readonly strides?: number | readonly [number, number];
+  readonly padding?: "same" | "valid";
+  readonly bias?: boolean;
+  readonly seed?: number;
+}
+
+export class Conv2d extends Module {
+  readonly inChannels: number;
+  readonly outChannels: number;
+  readonly kernelSize: readonly [number, number];
+  readonly strides: readonly [number, number];
+  readonly padding: "same" | "valid";
+  constructor(inChannels: number, outChannels: number, options: Conv2dOptions);
+  forward(input: Tensor): Tensor;
+}
+
+export interface Pool2DOptions {
+  readonly filterSize: number | readonly [number, number];
+  readonly strides?: number | readonly [number, number];
+  readonly padding?: "same" | "valid";
+}
+
+/** `strides` defaults to `filterSize`. */
+export class MaxPool2d extends Module {
+  constructor(options: Pool2DOptions);
+  forward(input: Tensor): Tensor;
+}
+
+/** `strides` defaults to `filterSize`. */
+export class AvgPool2d extends Module {
+  constructor(options: Pool2DOptions);
+  forward(input: Tensor): Tensor;
+}
+
 export class ReLU extends Module {
   forward(input: Tensor): Tensor;
 }

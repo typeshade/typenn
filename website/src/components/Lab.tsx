@@ -128,6 +128,10 @@ const text: { en: Record<string, any>; ko: Record<string, any> } = {
     resultTitle: "Result",
     errorTitle: "The run failed",
     errorHelp: "Try CPU, a smaller batch size, or fewer epochs.",
+    emptyLoss: "The loss curve appears when a run starts.",
+    emptyMetric: "The test metric appears after the first epoch.",
+    slowCpu:
+      "The CPU tier is slow for this model: about 2 s per step for the text model and about 4 s per step for the CNN, measured on one machine. Choose Auto on a browser with WebGPU.",
     graphNote:
       "The kernel graph of the last step is kept in this page. Its view comes in a later change.",
     running: "A run is in progress.",
@@ -137,7 +141,7 @@ const text: { en: Record<string, any>; ko: Record<string, any> } = {
   },
   ko: {
     intro:
-      "이 페이지에서 실제 데이터셋의 학습 데이터 전체로 TypeNN 모델을 학습합니다. 데이터는 Keras 데이터셋입니다. 원본 서버가 교차 출처 다운로드를 허용하지 않아 이 사이트에 미러로 제공합니다. 각 카드에 데이터셋의 출처와 라이선스를 표시합니다.",
+      "이 페이지에서 실제 데이터셋의 학습 데이터 전체로 TypeNN 모델을 학습합니다. 데이터는 Keras 데이터셋입니다. 원본 서버가 브라우저의 직접 내려받기(CORS)를 허용하지 않아 이 사이트가 사본을 제공합니다. 각 카드에 데이터셋의 출처와 라이선스를 표시합니다.",
     datasetTitle: "1. 데이터셋",
     download: "내려받기",
     downloading: "내려받는 중",
@@ -215,6 +219,10 @@ const text: { en: Record<string, any>; ko: Record<string, any> } = {
     resultTitle: "결과",
     errorTitle: "실행하지 못했습니다",
     errorHelp: "CPU를 선택하거나, 배치 크기를 줄이거나, 에포크를 줄여 보세요.",
+    emptyLoss: "학습을 시작하면 손실 곡선이 나타납니다.",
+    emptyMetric: "첫 에포크가 끝나면 테스트 지표가 나타납니다.",
+    slowCpu:
+      "이 모델은 CPU 계층에서 느립니다. 한 대의 기기에서 측정한 결과, 텍스트 모델은 한 스텝에 약 2초, CNN은 약 4초가 걸렸습니다. WebGPU를 지원하는 브라우저에서는 자동을 선택하세요.",
     graphNote:
       "마지막 단계의 커널 그래프는 이 페이지에 보관됩니다. 보기는 이후 변경에서 제공합니다.",
     running: "실행이 진행 중입니다.",
@@ -345,6 +353,7 @@ export default function Lab({ locale }: { locale: Locale }) {
   const [session, setSession] = useState<Session | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [stopping, setStopping] = useState(false);
+  const [activeTier, setActiveTier] = useState<string | null>(null);
 
   const memory = useRef(new Map<string, LoadedDataset>());
   const runningRef = useRef(false);
@@ -422,6 +431,14 @@ export default function Lab({ locale }: { locale: Locale }) {
     };
   }, []);
 
+  /** Drop the arrays of every dataset except `keep` and the one the live session uses. */
+  function releaseDatasets(keep: string) {
+    const inUse = sessionRef.current?.data.info.id;
+    for (const id of [...memory.current.keys()])
+      if (id !== keep && id !== inUse) memory.current.delete(id);
+    setLoadedIds((ids) => ids.filter((id) => memory.current.has(id)));
+  }
+
   async function ensureData(id: string): Promise<LoadedDataset> {
     const known = memory.current.get(id);
     if (known) return known;
@@ -449,6 +466,7 @@ export default function Lab({ locale }: { locale: Locale }) {
     setLosses([]);
     setMetrics([]);
     setProgress(null);
+    setActiveTier(null);
     setForm(config);
     setSelected(config.dataset);
     let device: Device | undefined;
@@ -459,7 +477,9 @@ export default function Lab({ locale }: { locale: Locale }) {
       sessionRef.current = null;
       setSession(null);
       if (previous) await previous.device.dispose();
+      releaseDatasets(config.dataset);
       device = await nn.device({ device: config.tier });
+      setActiveTier(device.backend.name);
       const trainDevice = device;
       const spec = specFor(data, config);
       const scale =
@@ -509,6 +529,7 @@ export default function Lab({ locale }: { locale: Locale }) {
 
   function selectDataset(id: string) {
     if (running) return;
+    releaseDatasets(id);
     setSelected(id);
     setForm(defaultConfig(id));
   }
@@ -700,6 +721,12 @@ export default function Lab({ locale }: { locale: Locale }) {
               {info.id} · {form.model}
             </p>
           )}
+          {(form.tier === "cpu" || activeTier === "cpu") &&
+            (form.model === "cnn" || form.model === "bag") && (
+              <p className="lab-note lab-warning" role="note">
+                {words.slowCpu}
+              </p>
+            )}
         </section>
 
         <section className="lab-section" aria-labelledby="lab-run">
@@ -757,6 +784,7 @@ export default function Lab({ locale }: { locale: Locale }) {
                 smooth
                 axisX={words.stepAxis}
                 label={words.lossChart}
+                empty={words.emptyLoss}
               />
             </figure>
             <figure>
@@ -765,6 +793,7 @@ export default function Lab({ locale }: { locale: Locale }) {
                 values={metrics}
                 axisX={words.epochAxis}
                 label={words.metricChart}
+                empty={words.emptyMetric}
                 points
                 lowerIsBetter={form.model === "regression"}
               />
@@ -1207,7 +1236,9 @@ function LineChart({
   axisX,
   label,
   lowerIsBetter = false,
+  empty,
 }: {
+  empty: string;
   values: number[];
   smooth?: boolean;
   points?: boolean;
@@ -1237,7 +1268,7 @@ function LineChart({
           textAnchor="middle"
           className="lab-chart-empty"
         >
-          ·
+          {empty}
         </text>
       </svg>
     );
@@ -1328,6 +1359,7 @@ function formatBytes(bytes: number) {
 }
 
 function formatTest(test: Metrics, regression: boolean, locale: Locale) {
+  if (test.rmse === undefined && test.accuracy === undefined) return "-";
   if (regression)
     return `RMSE ${Math.round(test.rmse ?? 0).toLocaleString(locale === "ko" ? "ko-KR" : "en-US")} USD · MAE ${Math.round(test.mae ?? 0).toLocaleString(locale === "ko" ? "ko-KR" : "en-US")} USD`;
   return `${((test.accuracy ?? 0) * 100).toFixed(2)}%`;
