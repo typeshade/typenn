@@ -35,7 +35,7 @@ The operation set is:
 - NHWC `conv2d`, `maxPool` and `avgPool`
 - `reshape`
 
-[TODO.md](./TODO.md) lists what is open. `Linear`, `ReLU`, `Tanh`, `Sigmoid` and `Sequential` compose
+[TODO.md](./TODO.md) lists what is open. `Linear`, `Conv2d`, `MaxPool2d`, `AvgPool2d`, `ReLU`, `Tanh`, `Sigmoid` and `Sequential` compose
 operations for inference:
 
 ```ts
@@ -101,12 +101,16 @@ for (const node of snapshot.nodes)
 ```
 
 Each node has an `id`, which stays the same for the life of its Tensor. `computed` is true when the
-Tensor already holds an array. A later `data()` does not compute it.
+Tensor already holds an array. `computed` is true for every input Tensor. A later `data()` does not
+compute it.
 
 After a read, `device.lastPlan` describes the plan. Its `report` is the `FuseReport`, and its `nodes`
 holds the graph id of each kernel call, in call order. The calls of `report.groups` line up with
 `nodes`. A copy that a repeated input needs takes the id of the operation that reads it.
 `device.lastReport` and `device.reports` do not change.
+
+If a plan fails, `device.lastPlan`, `device.lastReport` and `device.reports` keep the values they had
+before the failed plan.
 
 ## Devices and tiers
 
@@ -275,7 +279,8 @@ unsupported, and ask for the missing rule by name when called.
 - Intermediate tensors stay resident until disposed or the device is disposed. Use `disposeGraph()`
   to release an operation graph while preserving parameters.
 - `Module.to()`, `parameters()`, `train()`, and `eval()` support user-defined models and
-  registered child layers. `Flatten`, `Linear`/`Dense`, `ReLU`, `Tanh`, `Sigmoid` and `Dropout` are the layers. The example uses
+  registered child layers. `Flatten`, `Linear`/`Dense`, `Conv2d`, `MaxPool2d`, `AvgPool2d`, `ReLU`, `Tanh`, `Sigmoid` and
+  `Dropout` are the layers. The example uses
   `Flatten`, `Linear`, `ReLU` and `Dropout`. The losses are `CrossEntropyLoss`, with sparse integer
   labels, and `MSELoss`, the mean of squared differences. They are `nn.loss.crossEntropy` and
   `nn.loss.mse`.

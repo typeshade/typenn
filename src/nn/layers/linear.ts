@@ -2,7 +2,7 @@ import { Tensor } from "../../tensor/tensor.js";
 import type { Device } from "../../runtime/device.js";
 import { Module } from "../module.js";
 
-function random(seed: number): () => number {
+export function random(seed: number): () => number {
   let state = seed >>> 0;
   return () => {
     state = (Math.imul(state, 1664525) + 1013904223) >>> 0;

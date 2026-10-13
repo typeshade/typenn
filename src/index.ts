@@ -36,13 +36,17 @@ export {
   type CrossEntropyOptions,
 } from "./nn/loss/index.js";
 export {
+  AvgPool2d,
+  Conv2d,
   Dense,
   Dropout,
   Flatten,
   Linear,
+  MaxPool2d,
   ReLU,
   Sigmoid,
   Tanh,
+  type Conv2dOptions,
   type DropoutOptions,
   type LinearOptions,
 } from "./nn/layers.js";

@@ -1,5 +1,7 @@
 export { Dense } from "./layers/dense.js";
 export { Linear, type LinearOptions } from "./layers/linear.js";
+export { Conv2d, type Conv2dOptions } from "./layers/conv2d.js";
+export { AvgPool2d, MaxPool2d } from "./layers/pool2d.js";
 export { ReLU } from "./layers/relu.js";
 export { Tanh } from "./layers/tanh.js";
 export { Sigmoid } from "./layers/sigmoid.js";
