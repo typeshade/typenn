@@ -215,7 +215,7 @@ if (flags.scenario === "counts") {
   console.log(JSON.stringify({ dist, ...result }));
 } else {
   console.log(
-    `${flags.scenario === "chain" ? `chain of ${flags.length} elements` : "MNIST training step, batch 64"}, ${flags.steps} runs after ${flags.warmup} warm-up runs, on ${result.backend.name} (SwiftShader), build ${dist}`,
+    `${flags.scenario === "chain" ? `chain of ${flags.length} elements` : "MNIST training step, batch 64"}, ${flags.steps} runs after ${flags.warmup} warm-up runs, on ${result.backend.name} (${flags.hardware ? result.adapterInfo : "SwiftShader"}), build ${dist}`,
   );
   console.log(
     `median ${result.medianMs.toFixed(1)} ms, least ${result.minMs.toFixed(1)} ms, most ${result.maxMs.toFixed(1)} ms; the device was given ${result.seen.dispatches} dispatches in ${result.seen.submissions} submissions for one run`,
