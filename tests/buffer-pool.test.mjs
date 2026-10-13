@@ -442,6 +442,36 @@ test("adopt() moves a computed array into a parameter, and the array it replaces
   }
 });
 
+test("the parameters after pooled steps are those of unpooled steps, through Module.sync() and parameter.data()", async () => {
+  const bits = (values) => Array.from(new Uint32Array(values.slice().buffer));
+  const final = {};
+  for (const poolBytes of [0, undefined]) {
+    const device = await nn.device({
+      device: "cpu",
+      ...(poolBytes === undefined ? {} : { poolBytes }),
+    });
+    try {
+      const run = session(device, "mlp");
+      for (let step = 0; step < 6; step++) await run.step(step % 2 === 0);
+      // disposeGraph(parameters) kept the parameters; the layers' host arrays lag until sync().
+      await run.model.sync();
+      const layers = [...run.model.modules().values()].filter(
+        (module) => module.weight,
+      );
+      final[String(poolBytes)] = {
+        weights: layers.map((layer) => bits(layer.weight)),
+        data: await Promise.all(
+          run.parameters.map(async (parameter) => bits(await parameter.data())),
+        ),
+      };
+    } finally {
+      await device.dispose();
+    }
+  }
+  assert.ok(final["0"].weights.length > 0);
+  assert.deepEqual(final["undefined"], final["0"]);
+});
+
 test("a read of a tensor disposed before the read fails, and does not return another tensor's values", async () => {
   const device = await nn.device("cpu");
   try {

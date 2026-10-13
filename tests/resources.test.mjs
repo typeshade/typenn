@@ -77,6 +77,7 @@ test("a plan that fails leaves no array behind, and the same read runs again", a
 });
 
 test("a training step leaves no array behind", async () => {
+  // poolBytes: 0, because this test counts the live arrays, and the pool keeps the released ones.
   await onFakeGpuUnpooled(async (device, gpu) => {
     const model = new nn.Sequential(
       new nn.Flatten(),

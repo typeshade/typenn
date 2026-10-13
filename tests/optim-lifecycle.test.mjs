@@ -56,15 +56,13 @@ const onCpu = (body) => async () => {
 };
 
 /**
- * Run `body` on a fake WebGPU device. `poolBytes` is the device's pool bound.
- */
-/**
  * The tests that count the arrays a step frees run with `poolBytes: 0`, which frees each array at
  * once, as before the pool. The pool has its own tests in buffer-pool.test.mjs.
  */
 const onFakeGpuUnpooled = (body, options = {}) =>
   onFakeGpu(body, { ...options, poolBytes: 0 });
 
+/** Run `body` on a fake WebGPU device. `poolBytes` is the device's pool bound. */
 async function onFakeGpu(body, options = {}) {
   const { poolBytes, ...gpuOptions } = options;
   const gpu = fakeGpu(gpuOptions);
@@ -103,6 +101,7 @@ function countDestroys(gpu) {
 }
 
 test("every array an optimizer step replaces is destroyed exactly once", async () => {
+  // poolBytes: 0, because this test counts the arrays destroyed, and the pool keeps them instead.
   for (const make of [
     (p) => nn.optim.Adam(p, { lr: 0.01 }),
     (p) => nn.optim.SGD(p, { lr: 0.1 }),
@@ -164,6 +163,7 @@ test("a parameter used twice in one graph gets one summed gradient and one updat
 });
 
 test("a step on a disposed parameter is refused and leaves no array behind", async () => {
+  // poolBytes: 0, because this test counts the arrays destroyed, and the pool keeps them instead.
   await onFakeGpuUnpooled(async (device, gpu) => {
     const model = mlp().to(device);
     const parameters = model.parameters();
@@ -324,6 +324,7 @@ test("assign() on a stale parameter replaces the device value, and the next step
 });
 
 test("a plan that fails leaves the parameters and the moments as they were, and the step runs again", async () => {
+  // poolBytes: 0, because this test counts the arrays destroyed, and the pool keeps them instead.
   // Find which popErrorScope call is the plan of the second step: one dry run counts them.
   let stepPop = 0;
   await onFakeGpuUnpooled(async (device, gpu) => {
@@ -452,6 +453,7 @@ test("the first Adam step starts the moments at zero", async () => {
 });
 
 test("the moments are freed by optimizer.dispose(), and two optimizers keep their own", async () => {
+  // poolBytes: 0, because this test counts the arrays destroyed, and the pool keeps them instead.
   await onFakeGpuUnpooled(async (device, gpu) => {
     const model = mlp().to(device);
     const [layerA, , layerB] = model.modules().values();
