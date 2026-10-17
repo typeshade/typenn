@@ -6,6 +6,7 @@
 import { createRequire } from "node:module";
 import { mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 let server;
 
@@ -25,7 +26,7 @@ export async function loadNn() {
     format: "esm",
     external: ["vite", "typescript"],
   });
-  const vite = await import(require.resolve("vite"));
+  const vite = await import(pathToFileURL(require.resolve("vite")).href);
   server = await vite.createServer({
     root,
     configFile: join(configDirectory, "vite.config.mjs"),

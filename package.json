@@ -25,6 +25,7 @@
     "lint": "node scripts/lint.mjs",
     "test": "npm run build && node --test tests/*.test.mjs",
     "test:gpu": "npm run build && node --test tests/gpu/*.test.mjs",
+    "test:gpu:sampling": "npm run build && node --test tests/gpu/sampling.gpu.test.mjs",
     "prepack": "npm run build"
   },
   "files": [
