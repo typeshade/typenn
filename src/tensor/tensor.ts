@@ -28,9 +28,15 @@ import { softmax } from "./operations/normalization.js";
 import { reduce } from "./operations/reductions.js";
 import { reshape } from "./operations/shape.js";
 import { pool2d, pool2dGrad } from "./operations/spatial.js";
+import {
+  gridSampleNHWC,
+  resizeBilinear,
+  type SamplingOptions,
+} from "./operations/sampling.js";
 import type { Conv2DOptions, Pool2DOptions } from "./spatial.js";
 
 export type { Conv2DOptions, Pool2DOptions } from "./spatial.js";
+export type { SamplingOptions } from "./operations/sampling.js";
 
 export class Tensor {
   /**
@@ -61,6 +67,18 @@ export class Tensor {
 
   reshape(shape: Shape): Tensor {
     return reshape(this, shape);
+  }
+
+  gridSampleNHWC(grid: Tensor, options?: SamplingOptions): Tensor {
+    return gridSampleNHWC(this, grid, options);
+  }
+
+  resizeBilinear(
+    outHeight: number,
+    outWidth: number,
+    options?: SamplingOptions,
+  ): Tensor {
+    return resizeBilinear(this, outHeight, outWidth, options);
   }
 
   reluGrad(outputGradient: Tensor): Tensor {
