@@ -23,10 +23,15 @@ export function gridSampleNHWC(
     const gx = grid[gridIndex];
     const gy = grid[gridIndex + 1];
 
-    // TypeNN returns NaN for non-finite grid coordinates before backend-dependent integer
-    // conversion.
-    if (gx !== gx || gy !== gy || gx - gx !== 0.0 || gy - gy !== 0.0) {
-      out[i] = gx - gx + gy - gy;
+    // Classify exponent-all-ones values by their IEEE-754 bits. Arithmetic NaN checks can be
+    // folded under GPU fast-math, and subtraction does not reliably manufacture a NaN there.
+    const gxBits = bitcast<u32>(gx);
+    const gyBits = bitcast<u32>(gy);
+    const gxExponent = gxBits & 0x7f800000;
+    const gyExponent = gyBits & 0x7f800000;
+    if (gxExponent === 0x7f800000 || gyExponent === 0x7f800000) {
+      const nonFiniteBits = select(gyBits, gxBits, gxExponent === 0x7f800000);
+      out[i] = bitcast<f32>(nonFiniteBits | 0x00400000);
       continue;
     }
 
