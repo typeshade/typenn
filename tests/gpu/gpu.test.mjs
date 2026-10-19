@@ -139,7 +139,12 @@ async function plansOnDevice() {
     out.chainSeen = await counted(async () => {
       values = Array.from(await chain.data());
     });
-    out.chain = { values, report: device.lastReport };
+    // The report as the fake device's tests state it: the tier, the counts and each group's
+    // outline. A real device's report also carries the GPU time and the workgroup shapes.
+    out.chain = {
+      values,
+      report: { tier: device.lastReport.tier, ...stated(device.lastReport) },
+    };
 
     const layer = device
       .tensor(new Float32Array(64 * 784), { shape: [64, 784] })
