@@ -263,32 +263,41 @@ Each row gives the reason and the next action. A next action marked "proposal" i
 | No hardware GPU run                            | The GPU tests ran on SwiftShader in Chromium 141 only. No time on SwiftShader says how fast a hardware GPU trains.                                                                                                                        | Run `node scripts/bench-step.mjs` and `npm run test:gpu` on a machine with a GPU.                                                                 |
 | `publish.yml` is stale                         | Its check expects an empty namespace (`Object.keys(nn).length !== 0`), and the package exports names. It was so before this change.                                                                                                       | The owner decides what the pre-publish check must hold.                                                                                           |
 
-### Gaps in TypeShade at commit 96dbaa9
+### Gaps in TypeShade at commit be90a21
 
-TypeNN works around each gap. None is filed as an issue yet. Each gap was re-checked at 96dbaa9
-(TypeNN's pin, after the bump from 5fb79c7). The check and its result are in each item. The
-re-checks ran the compiler on probe sources (`compile()` of `typeshade`, Node 22) and read the
-source diff between the two pins. They did not re-run the GPU measurements.
+TypeNN works around each open gap. One is filed as an issue (typeshade/typeshade#684). Each gap was re-checked at
+be90a21 (TypeNN's pin, after the move from 96dbaa9 for TypeShade change 0071). The check and its
+result are in each item. The re-checks ran the compiler on probe sources (`compile()` of
+`typeshade` with `fuse: true`, Bun 1.4.2) and read the source of the pinned compiler. They did not
+re-run the GPU measurements.
 
 - Closed at 96dbaa9 (typeshade #607, "A failed batch destroys every buffer it made"). The
   batch now destroys its owned and staged buffers in a `finally` (`src/core/host-entry.ts`).
   Re-checked by reading the source. Not re-run on the recording device.
 - Still open: a kernel function cannot share the name of a builtin that it calls (TS8099 and
-  TS8031). This is as specified. Re-checked: a kernel `clamp` that calls `clamp` gives TS8031
-  (recursive call) at 96dbaa9. TypeNN names the maps `<operation>Map`.
-- Partly changed, still open: an array parameter named like a reserved WGSL word compiles for the
-  CPU and WebGL2 tiers. WebGPU refuses it at pipeline creation: `'filter' is a reserved keyword`.
-  At 96dbaa9 the compiler refuses a reserved name on an entry binding with TS8068. A kernel
-  function's array parameter named `filter` still gets no diagnostic (a `hostFace` probe, with
-  `fuse: true`). The WebGPU refusal of that parameter was not re-run.
+  TS8031). This is as specified. Re-checked at be90a21: a kernel `clamp` that calls `clamp` gives
+  TS8099 (a kernel function is not called) and TS8031 (recursive call). TypeNN names the maps
+  `<operation>Map`.
+- Closed at be90a21 (TypeShade change 0070: a declaration keeps the author's name, and the backend
+  respells what its target cannot spell). Before, an array parameter named like a reserved WGSL
+  word compiled for the CPU and WebGL2 tiers, and WebGPU refused it at pipeline creation:
+  `'filter' is a reserved keyword`. Re-checked: a kernel function's array parameter named `filter`
+  compiles with no diagnostic, and the WGSL does not contain the word `filter`. The pipeline
+  creation on WebGPU was not re-run.
 - Still open, not re-run: one `Resident` passed as two parameters of one call throws a
-  `TypeError`. TypeNN passes a copy. Reading the diff of `src/core/resident.ts` and `src/core/host-kernel.ts`
-  found no change to this check (a reading, not a run).
+  `TypeError` (`checkCall` in `src/core/host-kernel.ts`, read at be90a21). TypeNN passes a copy,
+  which is a scratch array of the plan's scope since the pin move.
+- Open at be90a21, filed as typeshade/typeshade#684: `createDevice({ device })` keeps WebGL2 and
+  the CPU tier as the fallback of a call WebGPU cannot run, and takes no `prefer` beside the
+  device. A TypeNN device opened with `gpuDevice` cannot require WebGPU. Observed by
+  `tests/instrument.test.mjs`: the refused `relu` runs on the CPU tier in a group of its own, where
+  it threw at 96dbaa9. TypeNN documents the behavior (README, Devices and tiers) until the
+  record decides.
 - Still open, not re-measured: on the CPU tier, `toCpu` (`src/core/host-entry.ts`, called by `onCpu`
   in `src/core/host-kernel.ts`) copies each array argument to a JavaScript array on each call, and
-  `fromCpu` copies it back. The byte copy of 96dbaa9 covers `readInto` and `pack`, not the array
-  path of `toCpu`. Three calls over 2^24 + 1 elements reached 3.3 GB of resident memory at
-  5fb79c7. That figure was not measured again.
+  `fromCpu` copies it back. Both are in `src/core/host-entry.ts` at be90a21 (a reading). Three
+  calls over 2^24 + 1 elements reached 3.3 GB of resident memory at 5fb79c7. That figure was not
+  measured again.
 
 ## Kernel function modules
 
@@ -334,9 +343,9 @@ Done:
 
 Open:
 
-- [ ] The device storage limit is read from the GPUDevice's limits when present, else 128 MiB.
-      Not measured on a real GPU. When TypeShade reports the runtime limits (proposal 0051), the
-      read moves to that API at the TODO in `device-dataset.ts`.
+- [ ] The device storage limit is read from the TypeShade device's `limits`
+      (`maxStorageBufferBindingSize` and `maxBufferSize`, `Device.storageBindingLimit()`) when
+      present, else 128 MiB. Not measured on a real GPU.
 - [ ] WebGL2: the dataset falls back to host batching. No WebGL2 measurement.
 - [ ] Bag-of-words gathers scan each sample's tokens for each output element: cost is vocab times
       tokens per row. Not measured on a real vocabulary.

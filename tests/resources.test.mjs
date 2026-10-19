@@ -2,6 +2,7 @@ import test, { after } from "node:test";
 import assert from "node:assert/strict";
 import { fakeGpu } from "./_fake-gpu.mjs";
 import { closeNn, loadNn } from "./_nn.mjs";
+import { outline } from "./_plans.mjs";
 
 // Arrays and plans over time: what a tensor holds after a read, a failure and a disposal.
 
@@ -68,7 +69,7 @@ test("a plan that fails leaves no array behind, and the same read runs again", a
       // The tensors have no array: the next read computes them again, and the device takes it.
       assert.deepEqual(Array.from(await y.data()), [0, 0, 0]);
       assert.equal(device.reports.length, 1);
-      assert.deepEqual(device.lastReport.groups, [
+      assert.deepEqual(outline(device.lastReport), [
         { calls: ["relu", "negMap"], fused: true },
       ]);
     },
@@ -88,7 +89,12 @@ test("a training step leaves no array behind", async () => {
     const parameters = model.parameters();
     const optimizer = nn.optim.Adam(parameters, { lr: 0.01 });
     const criterion = new nn.CrossEntropyLoss();
-    const live = () => gpu.made.filter((buffer) => !buffer.destroyed).length;
+    // The storage buffers (WebGPU's STORAGE usage, 128): the arrays. The runtime keeps a ring of
+    // uniform buffers for the device across plans, which is not an array.
+    const live = () =>
+      gpu.made.filter(
+        (buffer) => !buffer.destroyed && (buffer.usage & 128) !== 0,
+      ).length;
     const counts = [];
     for (let step = 0; step < 5; step++) {
       await optimizer.zeroGrad();
@@ -113,12 +119,17 @@ test("a training step leaves no array behind", async () => {
     // Four parameters, and the two moments of each on the device, and nothing else.
     assert.equal(live(), 4 + 2 * 4);
   });
-  // A disposed device has freed everything it made.
+  // A disposed device has freed every array it made. The runtime keeps its ring of uniform
+  // buffers for the GPUDevice, which the application handed in and keeps.
   const gpu = fakeGpu();
   const device = await nn.device({ device: "webgpu", gpuDevice: gpu.device });
   await vector(device, [1, 2]).relu().data();
   await device.dispose();
-  assert.equal(gpu.made.filter((buffer) => !buffer.destroyed).length, 0);
+  assert.equal(
+    gpu.made.filter((buffer) => !buffer.destroyed && (buffer.usage & 128) !== 0)
+      .length,
+    0,
+  );
 });
 
 test("a parameter written by the optimizer is what the next plan reads", async () => {

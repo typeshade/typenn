@@ -151,8 +151,10 @@ before the failed plan.
 | `"cpu"`            | CPU                                          | Not applicable                                              |
 
 `device.backend.name` is the tier selected. The option `gpuDevice` hands TypeNN a `GPUDevice` that
-the application owns. TypeNN runs its kernel functions on it and never destroys it. The option
-`poolBytes` bounds the pool of released arrays (see How a read runs).
+the application owns. TypeNN runs its kernel functions on it and never destroys it. A call that
+WebGPU cannot run then falls to the CPU tier, in a group of its own: `createDevice({ device })`
+takes no `prefer` beside the device (TypeShade `be90a21`, typeshade/typeshade#684). Without
+`gpuDevice`, `"webgpu"` is required. The option `poolBytes` bounds the pool of released arrays (see How a read runs).
 
 A TypeNN device is a TypeShade device owner (`createDevice()` of `typeshade/runtime`, TypeShade
 change 0071). Two devices in one JavaScript context are independent. A tensor operation takes the
@@ -272,8 +274,8 @@ current Tensor-graph gradient rules.
 
 TypeShade owns the shader language and the GPU execution runtime. TypeNN's `.shade.ts` kernel
 functions are compiled during the library build. Applications use TypeNN's Tensor and Module API
-and do not author shaders. The build pins TypeShade to the source commit `96dbaa9`, which has
-`typeshade/fuse`, because TypeShade's npm registry package is still a placeholder.
+and do not author shaders. The build pins TypeShade to the source commit `be90a21`, which has
+`createDevice()` (change 0071), because TypeShade's npm registry package is still a placeholder.
 
 For custom functions written as pure TypeShade IR, TypeNN also re-exports TypeShade's
 `grad` and `gradCheck` as `shadeGrad` and `shadeGradCheck`. They can generate and check
@@ -348,11 +350,12 @@ unsupported, and ask for the missing rule by name when called.
 
 ## Measurements
 
-Each measurement names the commit it was taken on. The sections below are historical, except
-"Pin 96dbaa9 (current)", which holds the numbers for the pin the build uses now. A row that
-names an older commit or pin is a record of that commit, and the current code may differ.
+Each measurement names the commit it was taken on. The sections below are historical. The build
+pins TypeShade `be90a21` now, and no time was measured on that pin. "Pin 96dbaa9" holds the last
+times, on the pin before. A row that names an older commit or pin is a record of that commit, and
+the current code may differ.
 
-### Pin 96dbaa9 (current)
+### Pin 96dbaa9
 
 Before is `origin/main` at commit `f22b352`, which pins TypeShade `5fb79c7`. After is this
 branch, which pins TypeShade `96dbaa9`. Both were measured on one machine, in headless Chromium

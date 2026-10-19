@@ -4,10 +4,9 @@ import {
   type Resident,
 } from "typeshade/runtime";
 // The planner. `device.fuse()` runs through the slot this import fills (TypeShade change 0071,
-// Amendment 1): the runtime ships none of the planner, so the application imports it once. The
-// binding is read in `Device.open()`, since the pinned compiler's `package.json` does not list
-// `src/fuse.ts` in `sideEffects` yet, and Vite drops a bare import of it (typeshade PR, 2026-10-19).
-import { fuse as planner, type FuseReport } from "typeshade/fuse";
+// Amendment 1): the runtime ships none of the planner, so the application imports it once.
+import "typeshade/fuse";
+import type { FuseReport } from "typeshade/fuse";
 import type { DevicePlan } from "./device-types.js";
 import { checkedShape, sizeOf, type Shape } from "../tensor/shape.js";
 import type { OpNode } from "../tensor/node.js";
@@ -95,9 +94,10 @@ export class Device {
         `The gpuDevice option is a GPUDevice, which the ${preference} device does not use.`,
       );
     // The kernel functions run on the first tier of `prefer` that opens, and a call that tier
-    // cannot run falls to the tiers after it. An explicit WebGPU device is required to run them
-    // all there; `auto` and `webgl2` keep the CPU tier for the calls they cannot run, such as the
-    // ones that take an array of strides.
+    // cannot run falls to the tiers after it. `webgpu` alone is required; `auto` and `webgl2`
+    // keep the CPU tier for the calls they cannot run, such as the ones that take an array of
+    // strides. A `GPUDevice` the application hands in keeps every later tier as the fallback:
+    // `createDevice({ device })` takes no `prefer` beside it (TypeShade be90a21).
     const shade = await createDevice(
       options.gpuDevice !== undefined
         ? { device: options.gpuDevice, poolBytes }
@@ -111,10 +111,6 @@ export class Device {
             poolBytes,
           },
     );
-    if (typeof planner !== "function")
-      throw new Error(
-        "typeshade/fuse is not loaded: device.fuse() needs its planner.",
-      );
     const name: ExecutionTier = shade.tier;
     const fallbackReason =
       preference === "auto" && shade.skipped.length > 0
@@ -246,12 +242,16 @@ export class Device {
     source.storage = undefined;
   }
 
-  /** @internal Give back the array of a tensor, which the device reuses or frees. */
+  /**
+   * @internal Give back the array of a tensor, which the device reuses or frees. After
+   * `dispose()` the owner has freed every array, and a tensor that outlives the device gives
+   * back nothing.
+   */
   release(tensor: Tensor): void {
     const array = tensor.storage;
     if (array === undefined) return;
     tensor.storage = undefined;
-    this.memory.recycle(array);
+    if (!this.disposed) this.memory.recycle(array);
   }
 
   /**
