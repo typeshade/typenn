@@ -51,15 +51,16 @@ Tensors, the scalars the kernel function takes by value, and the gradient rule. 
 these steps:
 
 1. Collect the nodes under the Tensor that have no array yet, in graph order.
-2. Take one `Resident` array for each node from the device's pool of released arrays, or make one.
-   Upload each leaf that has no array yet.
-3. Call `fuse` (`typeshade/fuse`) with a body that calls `kernel(out, ...inputs, ...values)` for each
-   node.
+2. Take one `Resident` array for each node from the TypeShade device (`device.array()`), which gives
+   a released array of the same length back or makes one. Upload each leaf that has no array yet.
+3. Call `device.fuse()` of the TypeShade device with a body that calls
+   `kernel(out, ...inputs, ...values)` for each node.
 4. Keep the `FuseReport` of the scope as `device.lastReport`.
 5. Read the Tensor back, once.
 
-A kernel call writes every element of its output. So a pooled array keeps the values it held before,
-and TypeNN does not zero it or upload zeros for it.
+A kernel call writes every element of its output. A released array that comes back holds zeros
+(TypeShade Rule 11.8): the TypeShade device clears its buffer in the plan's own encoder, before the
+pass that binds it. The clear is no upload and no submission of its own.
 
 The compiler plans the scope. It puts consecutive calls in one dispatch when the facts of TypeShade
 Rule 11.13 hold. `device.lastReport` shows the plan:
@@ -95,10 +96,12 @@ TypeNN frees the arrays of that plan and rethrows the error. The next `data()` c
 ### The pool of released arrays
 
 `dispose()`, `disposeGraph()`, a step of an optimizer and the `zeroGrad()` of an optimizer give
-their arrays back to the device. The device keeps a released array while the pool has room, and
-gives it to a later plan of the same number of elements. The pool holds at most `poolBytes` bytes,
-which is 64 MiB by default. An array that does not fit is freed at once. Pass `poolBytes: 0` to
-free every released array at once:
+their arrays back to the device. The pool is the TypeShade device's (`createDevice({ poolBytes })`,
+TypeShade change 0071). It keeps a released array while it has room, and gives it to a later plan
+of the same number of elements. The pool holds at most `poolBytes` bytes, which is 64 MiB by
+default. When a released array does not fit, the oldest released arrays leave first until it fits,
+and an array larger than the whole pool is freed at once. Pass `poolBytes: 0` to free every
+released array at once:
 
 ```ts
 const device = await nn.device({
@@ -107,9 +110,11 @@ const device = await nn.device({
 });
 ```
 
-A pooled array is never given to a Tensor that still holds it. An array that `device.adopt()`
-moves into a parameter leaves the pool's ownership. `device.dispose()` frees every array, pooled or
-not, each once. The arrays of a plan that failed are freed, not pooled.
+A pooled array is never given to a Tensor that still holds it: TypeNN releases an array only when
+no Tensor holds it. `device.adopt()` moves an array from one Tensor to another and releases none.
+`device.dispose()` frees every array, pooled or not, each once. The arrays of a plan that failed
+are freed, not pooled. `device.statistics` counts the arrays that are live and pooled, and the
+allocations and reuses.
 
 ## Inspecting a graph
 
@@ -147,9 +152,12 @@ before the failed plan.
 
 `device.backend.name` is the tier selected. The option `gpuDevice` hands TypeNN a `GPUDevice` that
 the application owns. TypeNN runs its kernel functions on it and never destroys it. The option
-`poolBytes` bounds the pool of released arrays (see How a read runs). TypeShade's
-call-layer configuration is process-global, so TypeNN permits one active device per JavaScript
-context.
+`poolBytes` bounds the pool of released arrays (see How a read runs).
+
+A TypeNN device is a TypeShade device owner (`createDevice()` of `typeshade/runtime`, TypeShade
+change 0071). Two devices in one JavaScript context are independent. A tensor operation takes the
+tensors of one device, and refuses tensors of two. TypeNN's `data()` runs on the device alone, and
+leaves TypeShade's process-global `configure()` as the application set it.
 
 ## Kernel functions
 

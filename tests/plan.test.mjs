@@ -5,6 +5,7 @@ import {
   MNIST_BACKWARD,
   MNIST_FORWARD,
   mnistPlans,
+  outline,
   stated,
 } from "./_plans.mjs";
 import { closeNn, loadNn } from "./_nn.mjs";
@@ -17,9 +18,16 @@ import { closeNn, loadNn } from "./_nn.mjs";
 // A boundary between two groups is decided by a fact of the compiler (TypeShade Rule 11.13), and
 // each test that expects one names it: F3, a call reads at another index than `i` what the call
 // before it wrote; F5, one dispatch binds at most the storage buffers the device allows (8).
+//
+// A report is compared through `stated` and `outline` (`_plans.mjs`): the tier, the counts, each
+// group's calls, whether it fused and why. The workgroup shape of each dispatch, which the report
+// carries since TypeShade change 0067, is the compiler's to hold.
 
 const nn = await loadNn();
 after(closeNn);
+
+/** A report with its tier, as the tests below state a whole plan. */
+const planned = (report) => ({ tier: report.tier, ...stated(report) });
 
 /** Run `body` on a TypeNN device over a fake WebGPU device, and dispose of both. */
 async function onFakeGpu(body, options = {}) {
@@ -44,7 +52,7 @@ test("a.add(b).mul(c).relu() is one dispatch, one submission, one fused group", 
     const y = a.add(b).mul(c).relu();
     gpu.mark();
     await y.data();
-    assert.deepEqual(device.lastReport, {
+    assert.deepEqual(planned(device.lastReport), {
       tier: "webgpu",
       dispatches: 1,
       submissions: 1,
@@ -64,7 +72,7 @@ test("a broadcast operand that is read at the loop's index keeps the chain in on
     // `x.mul(x)` reads one tensor twice, so its second read is a copy that joins the dispatch.
     // `addExpand` reads the product at `i` and the bias at `i % 3`: only the written array
     // decides (F3).
-    assert.deepEqual(device.lastReport, {
+    assert.deepEqual(planned(device.lastReport), {
       tier: "webgpu",
       dispatches: 1,
       submissions: 1,
@@ -102,7 +110,7 @@ test("a dense layer, matmul then bias then relu, is one dispatch", async () => {
     // `matmul` reads its inputs at any index, which is no fact against a fuse: only an array
     // that one call wrote and a later call reads must be read at `i` (F3). The output of `matmul`
     // is written at `i` and read at `i` by `addExpand`, and the bias is only read.
-    assert.deepEqual(device.lastReport, {
+    assert.deepEqual(planned(device.lastReport), {
       tier: "webgpu",
       dispatches: 1,
       submissions: 1,
@@ -116,7 +124,7 @@ test("a reduction runs over fewer elements than the call before it, which is a d
     const x = device.tensor(new Float32Array(6 * 4), { shape: [6, 4] });
     await x.relu().sum(1).data();
     assert.equal(device.lastReport.dispatches, 2);
-    assert.deepEqual(device.lastReport.groups, [
+    assert.deepEqual(outline(device.lastReport), [
       { calls: ["relu"], fused: false },
       {
         calls: ["sumAxis"],
@@ -169,7 +177,7 @@ test("a diamond computes its shared node once, in one dispatch", async () => {
     await out.data();
     // Five calls and not seven: `shared` is one call. Seven arrays are bound, under the device's
     // eight (F5): the two leaves, the four intermediates and the result.
-    assert.deepEqual(device.lastReport.groups, [
+    assert.deepEqual(outline(device.lastReport), [
       { calls: ["add", "mul", "mul", "add", "relu"], fused: true },
     ]);
     assert.equal(device.lastReport.dispatches, 1);
@@ -182,7 +190,7 @@ test("a tensor that reads one tensor twice reads a copy of it", async () => {
     await a.add(a).data();
     // One array must not be two parameters of one call, so the second read is a copy, and the
     // copy and the add are one dispatch.
-    assert.deepEqual(device.lastReport.groups, [
+    assert.deepEqual(outline(device.lastReport), [
       { calls: ["copy", "add"], fused: true },
     ]);
     assert.equal(device.lastReport.dispatches, 1);
@@ -205,7 +213,7 @@ test("a later data() of an intermediate dispatches nothing, and reads its array"
     gpu.mark();
     await sum.relu().data();
     assert.equal(device.reports.length, plans + 1);
-    assert.deepEqual(device.lastReport.groups, [
+    assert.deepEqual(outline(device.lastReport), [
       { calls: ["relu"], fused: false },
     ]);
   });
@@ -221,7 +229,7 @@ test("a chain longer than the device's storage buffers is cut where it stops fit
       // Every tensor TypeNN computes has an array of its own, which a later `data()` and the
       // gradient graph read, so none is a local of the entry (F5 counts each as a buffer). Three
       // calls bind a, b, c, d and their three results: 7 arrays, and the fourth would make 9.
-      assert.deepEqual(device.lastReport.groups, [
+      assert.deepEqual(outline(device.lastReport), [
         { calls: ["add", "add", "add"], fused: true },
         {
           calls: ["add", "add", "relu"],
@@ -255,7 +263,7 @@ test("on the CPU tier the plan has no dispatch and no submission", async () => {
     const b = vector(device, [5, -3, 2, -8]);
     await a.add(b).relu().data();
     // The CPU tier never fuses, and says nothing of why (TypeShade Rule 11.13).
-    assert.deepEqual(device.lastReport, {
+    assert.deepEqual(planned(device.lastReport), {
       tier: "cpu",
       dispatches: 0,
       submissions: 0,
