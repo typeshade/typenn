@@ -19,9 +19,9 @@ import { fileURLToPath } from "node:url";
 //                 no value.
 //   the plan:     `relu` reads an element of the array it writes, at another index. The proof of
 //                 TypeShade Rule 8.22 refuses the loop (R4, TS8070), so `relu` runs on the CPU
-//                 tier, in a group of its own. The values do not change, so only
-//                 `plan.test.mjs`, which asserts the tier, the dispatches and the groups, can
-//                 see it.
+//                 tier, in a group of its own whose `why` names the refusal. The values do not
+//                 change, so only `plan.test.mjs`, which asserts the tier, the dispatches and the
+//                 groups, can see it.
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -99,9 +99,9 @@ test("a kernel function that computes a wrong value fails the numerics tests", a
 });
 
 test("a kernel function the proof refuses fails the plan tests, and no value changes", async () => {
-  // The device is required to run every call on WebGPU, so the refused `relu` is an error. On a
-  // device that may fall back, it is a group of its own: either way the report is not the one
-  // asserted.
+  // The device is a `GPUDevice` the test hands in, and TypeShade keeps the CPU tier as the
+  // fallback of a call WebGPU cannot run (`createDevice({ device })`, be90a21). The refused `relu`
+  // is a group of its own, and its `why` names the refusal: the report is not the one asserted.
   const plan = await run("plan.test.mjs", refusedLoop);
   assert.notEqual(plan.status, 0);
   assert.match(
@@ -110,7 +110,7 @@ test("a kernel function the proof refuses fails the plan tests, and no value cha
   );
   assert.match(
     plan.output,
-    /relu\(\): no tier it may use can run it \(webgpu: it runs on the CPU/,
+    /why: 'relu runs on the CPU, a loop of it runs on the CPU \(TS8070\)'/,
   );
   // `relu` runs on the CPU tier and gives the values it gave, so the numerics tests pass.
   assert.equal((await run("numerics.test.mjs", refusedLoop)).status, 0);

@@ -117,14 +117,14 @@ test("every array an optimizer step replaces is destroyed exactly once", async (
         await optimizer.step();
         await loss.disposeGraph(parameters);
         await optimizer.zeroGrad();
-        counts.push(live(gpu));
+        counts.push(liveArrays(gpu));
       }
       assert.equal(new Set(counts).size, 1, `live after each step: ${counts}`);
       await optimizer.dispose();
       await Promise.all(parameters.map((parameter) => parameter.dispose()));
-      assert.equal(live(gpu), 0);
+      assert.equal(liveArrays(gpu), 0);
       await device.dispose();
-      assert.equal(live(gpu), 0);
+      assert.equal(liveArrays(gpu), 0);
       assert.ok(destroys.size > 0);
       for (const times of destroys.values()) assert.equal(times, 1);
     });
@@ -174,17 +174,17 @@ test("a step on a disposed parameter is refused and leaves no array behind", asy
     const loss2 = await backward(device, model, optimizer);
     const grads = parameters.map((parameter) => parameter.grad);
     await parameters[1].dispose();
-    const before = live(gpu);
+    const before = liveArrays(gpu);
     await assert.rejects(() => optimizer.step(), /disposed/);
-    assert.equal(live(gpu), before, "the refused step made no array");
+    assert.equal(liveArrays(gpu), before, "the refused step made no array");
     // adopt() on a disposed target frees the array it was given instead of keeping it.
     const target = parameters[1];
     const source = parameters[0].add(parameters[0]);
     await device.computeAll([source]);
-    const withSource = live(gpu);
+    const withSource = liveArrays(gpu);
     assert.throws(() => device.adopt(target, source), /disposed/);
     assert.equal(source.storage, undefined);
-    assert.equal(live(gpu), withSource - 1);
+    assert.equal(liveArrays(gpu), withSource - 1);
     assert.equal(target.storage, undefined);
     void loss2;
     void grads;
@@ -200,7 +200,7 @@ test("device.dispose() with parameters not yet read back frees everything once",
     await train(device, model, optimizer, 2);
     assert.ok(parameters.every((parameter) => parameter.hostStale));
     await device.dispose();
-    assert.equal(live(gpu), 0);
+    assert.equal(liveArrays(gpu), 0);
     // The tensors outlive the device: disposing them neither reads nor frees again.
     await Promise.all(parameters.map((parameter) => parameter.dispose()));
     await optimizer.dispose();
@@ -222,7 +222,7 @@ test("a device disposed while a step runs ends the step, not the process", async
     // The step either finished first or was refused as disposed; nothing else.
     if (stepped.status === "rejected")
       assert.match(String(stepped.reason), /disposed/);
-    assert.equal(live(gpu), 0);
+    assert.equal(liveArrays(gpu), 0);
     for (const times of destroys.values()) assert.equal(times, 1);
   });
 });
@@ -495,7 +495,7 @@ test("the moments are freed by optimizer.dispose(), and two optimizers keep thei
     assert.equal(liveArrays(gpu), both - 2 * parameters.length);
     // Disposing the parameters afterwards frees theirs; no moment is left to leak.
     await Promise.all(parameters.map((parameter) => parameter.dispose()));
-    assert.equal(live(gpu), 0);
+    assert.equal(liveArrays(gpu), 0);
     void layerA;
     void layerB;
   });

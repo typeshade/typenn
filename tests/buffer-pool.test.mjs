@@ -188,12 +188,9 @@ for (const name of ["mlp", "cnn"]) {
           delta.zeroUploadBytes <= 4,
           `zero bytes uploaded: ${delta.zeroUploadBytes}`,
         );
-        // Every other buffer is the runtime's own: one uniform buffer per dispatch, and one staging
-        // buffer per readback.
-        assert.equal(
-          delta.buffers - delta.storageBuffers,
-          delta.dispatches + delta.readbacks,
-        );
+        // Every other buffer is the runtime's own: one staging buffer per readback. The uniforms
+        // of the dispatches share a ring the runtime keeps across plans (TypeShade 6f28913).
+        assert.equal(delta.buffers - delta.storageBuffers, delta.readbacks);
         assert.equal(delta.dispatches, 19);
         assert.equal(delta.readbacks, 1);
         assert.equal(delta.readBytes, 4);
@@ -519,8 +516,11 @@ test("device.dispose() frees the pooled arrays, each once", async () => {
   assert.ok(storageLive(gpu) > 0, "the pool holds arrays before the dispose");
   await device.dispose();
   assert.equal(storageLive(gpu), 0);
+  // Every storage buffer, pooled or not, is destroyed once. The runtime keeps its uniform ring
+  // for the GPUDevice, which the application handed in and keeps.
   for (const buffer of gpu.made)
-    assert.equal(buffer.destroys, 1, "destroy calls");
+    if ((buffer.usage & 128) !== 0)
+      assert.equal(buffer.destroys, 1, "destroy calls");
 });
 
 test("poolBytes is a whole number of bytes, 0 or more", async () => {

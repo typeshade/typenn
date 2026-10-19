@@ -1,4 +1,4 @@
-import { resident, type Resident } from "typeshade/runtime";
+import type { Resident } from "typeshade/runtime";
 import type { Device } from "../runtime/device.js";
 import {
   bagOfWords,
@@ -732,7 +732,7 @@ export class DeviceDataset {
   }
 
   private keep<T extends Uint32Array | Float32Array>(array: T): Resident<T> {
-    const handle = resident(array);
+    const handle = this.device.keep(array);
     this.handles.push({
       resident: handle as Resident<unknown>,
       bytes: array.byteLength,

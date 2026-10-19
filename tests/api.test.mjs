@@ -17,7 +17,7 @@ async function onCpu(body) {
   }
 }
 
-test("a device is one of auto, webgpu, webgl2 and cpu, and one is open at a time", async () => {
+test("a device is one of auto, webgpu, webgl2 and cpu, and two are open at a time", async () => {
   await assert.rejects(() => nn.device("metal"), {
     name: "TypeError",
     message: "Unknown TypeNN device preference: metal.",
@@ -27,12 +27,22 @@ test("a device is one of auto, webgpu, webgl2 and cpu, and one is open at a time
   });
   await onCpu(async (device) => {
     assert.deepEqual(device.backend, { provider: "typeshade", name: "cpu" });
-    await assert.rejects(() => nn.device("cpu"), {
-      message:
-        "TypeNN currently supports one active Device per JavaScript context.",
-    });
+    // Two devices coexist (TypeShade change 0071): each owns its arrays and its plans.
+    const other = await nn.device("cpu");
+    try {
+      const a = device.tensor([1, -2], { shape: [2] });
+      const b = other.tensor([-3, 4], { shape: [2] });
+      assert.deepEqual([...(await a.relu().data())], [1, 0]);
+      assert.deepEqual([...(await b.relu().data())], [0, 4]);
+      // A tensor of one device is refused by an operation of the other, before any plan.
+      assert.throws(() => a.add(b), {
+        message:
+          "Tensor operations require tensors from the same TypeNN device.",
+      });
+    } finally {
+      await other.dispose();
+    }
   });
-  // A disposed device leaves room for the next.
   await onCpu(async () => {});
 });
 
@@ -42,14 +52,14 @@ test("without a GPU, auto falls back to the CPU tier and says why", async () => 
     assert.equal(device.backend.name, "cpu");
     assert.match(
       device.backend.fallbackReason,
-      /webgpu: navigator\.gpu is undefined/,
+      /webgpu: there is no WebGPU device/,
     );
   } finally {
     await device.dispose();
   }
   await assert.rejects(
     () => nn.device("webgpu"),
-    /navigator\.gpu is undefined/,
+    /webgpu: there is no WebGPU device/,
   );
 });
 

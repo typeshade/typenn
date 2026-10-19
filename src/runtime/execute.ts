@@ -1,4 +1,4 @@
-import { fuse, type FuseReport, type FuseScope } from "typeshade/fuse";
+import type { FuseReport, FuseScope } from "typeshade/fuse";
 import { type Resident } from "typeshade/runtime";
 import { postOrder } from "../autograd/graph.js";
 import { copy } from "../kernels/map.shade.ts";
@@ -22,6 +22,8 @@ export interface Memory {
   recycle(array: Resident<Float32Array>): void;
   /** Keep the report of a plan, and the graph id of each of its kernel calls, in call order. */
   record(report: FuseReport, nodes: readonly number[]): void;
+  /** Run `body` as one plan on the device that owns the arrays (`device.fuse()`, change 0071). */
+  fuse(body: (scope: FuseScope) => void): Promise<FuseReport>;
 }
 
 /**
@@ -76,7 +78,7 @@ async function plan(pending: readonly Tensor[], memory: Memory): Promise<void> {
   const nodes: number[] = [];
   try {
     memory.record(
-      await fuse((scope) => {
+      await memory.fuse((scope) => {
         for (const tensor of pending) {
           const node = tensor.node as OpNode;
           const id = graphId(tensor);

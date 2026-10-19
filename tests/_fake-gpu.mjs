@@ -24,6 +24,7 @@ export function fakeGpu(options = {}) {
     readBytes: 0,
     submissions: 0,
     dispatches: 0,
+    clears: 0,
   };
   /** The WGSL of every shader module the device was asked to make. */
   const shaders = [];
@@ -75,6 +76,13 @@ export function fakeGpu(options = {}) {
         stats.readBytes += size;
       }
       commands.push(`copy ${size}`);
+    },
+    // A pooled array that comes back as a zeroed one is cleared on the device, with no upload
+    // (TypeShade change 0071). The device records it, and the buffer counts as written.
+    clearBuffer: (target) => {
+      if (target.record !== undefined) target.record.written = true;
+      stats.clears++;
+      commands.push("clear");
     },
     finish: () => ({}),
   };

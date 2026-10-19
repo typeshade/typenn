@@ -1,10 +1,11 @@
 import {
-  configure,
-  createRuntime,
-  resident,
+  createDevice,
+  type Device as ShadeDevice,
   type Resident,
-  type Runtime,
 } from "typeshade/runtime";
+// The planner. `device.fuse()` runs through the slot this import fills (TypeShade change 0071,
+// Amendment 1): the runtime ships none of the planner, so the application imports it once.
+import "typeshade/fuse";
 import type { FuseReport } from "typeshade/fuse";
 import type { DevicePlan } from "./device-types.js";
 import { checkedShape, sizeOf, type Shape } from "../tensor/shape.js";
@@ -29,57 +30,49 @@ export type {
   ExecutionTier,
 } from "./device-types.js";
 
-// TypeShade's direct call-layer configuration is process-global. A single active device keeps
-// selection and resident ownership predictable.
-let activeDevice: Device | undefined;
-
 /** How many reports of plans `Device.reports` keeps. */
 const REPORT_HISTORY = 256;
 
 /**
  * The most bytes of released arrays the device keeps for reuse, unless `poolBytes` says otherwise.
- * Each array counts once, at its byte length: its host copy and its device buffer are one each.
+ * The pool is TypeShade's (`createDevice({ poolBytes })`, change 0071): a released array comes
+ * back for the next array of the same element and length, and the oldest released array leaves
+ * first when the pool is full.
  */
 const DEFAULT_POOL_BYTES = 64 * 1024 * 1024;
 
+/**
+ * A TypeNN device: the owner of the tensors' arrays and the plans that compute them, over a
+ * TypeShade device owner (`createDevice()` of `typeshade/runtime`, change 0071). TypeShade holds
+ * the tier, the arrays and their pool, the limits and the plans; TypeNN holds the tensors, the
+ * graph and the report history. Two devices in one JavaScript context are independent.
+ */
 export class Device {
   readonly backend: BackendInfo;
-  /** Every array the device made and has not freed, with its number of elements. */
-  private readonly live = new Map<Resident<Float32Array>, number>();
-  /** The released arrays kept for reuse, by number of elements. Each is also in `live`. */
-  private readonly free = new Map<number, Resident<Float32Array>[]>();
-  private pooledBytes = 0;
-  private readonly poolBytes: number;
+  /** The TypeShade device owner: the tier, the arrays and their pool, the plans. */
+  private readonly shade: ShadeDevice;
   private readonly pending = new Set<Promise<unknown>>();
   private readonly history: FuseReport[] = [];
   private plan?: DevicePlan;
   private readonly memory: Memory = {
-    keep: (values) => this.acquire(values.length, values),
-    output: (length) => this.acquire(length),
-    drop: (array) => {
-      // An array is destroyed once: not again after the device freed it.
-      if (!this.live.delete(array)) return;
-      array.destroy();
-    },
-    recycle: (array) => this.recycle(array),
+    keep: (values) => this.shade.array(values),
+    output: (length) => this.shade.array(length, "f32"),
+    // A handle the host destroys leaves the owner's books; a second destroy is a no-op.
+    drop: (array) => array.destroy(),
+    recycle: (array) => this.shade.release(array),
+    fuse: (body) => this.shade.fuse(body),
     record: (report, nodes) => {
       this.history.push(report);
       if (this.history.length > REPORT_HISTORY) this.history.shift();
       this.plan = { report, nodes: nodes.slice() };
     },
   };
-  private runtime?: Runtime;
   private disposed = false;
   private disposing = false;
 
-  private constructor(
-    backend: BackendInfo,
-    poolBytes: number,
-    runtime?: Runtime,
-  ) {
+  private constructor(backend: BackendInfo, shade: ShadeDevice) {
     this.backend = backend;
-    this.poolBytes = poolBytes;
-    this.runtime = runtime;
+    this.shade = shade;
   }
 
   static async open(options: DeviceOptions = {}): Promise<Device> {
@@ -100,49 +93,37 @@ export class Device {
       throw new TypeError(
         `The gpuDevice option is a GPUDevice, which the ${preference} device does not use.`,
       );
-    if (activeDevice && !activeDevice.isDisposed())
-      throw new Error(
-        "TypeNN currently supports one active Device per JavaScript context.",
-      );
-
-    const { runtime, fallbackReason } = await selectRuntime(
-      preference,
-      options.gpuDevice,
-    );
-    const name: ExecutionTier = runtime?.tier ?? "cpu";
-    try {
-      // The kernel functions run on the first tier of `prefer` that can run them. An explicit
-      // WebGPU device is required to run them all there; the other tiers list the CPU tier last
-      // for the calls they cannot run, such as the ones that take an array of strides.
-      configure({ runtime: name === "webgpu" ? runtime! : null });
-      configure({
-        prefer:
-          name === "cpu"
-            ? ["cpu"]
-            : name === "webgl2"
-              ? ["webgl2", "cpu"]
-              : preference === "auto"
+    // The kernel functions run on the first tier of `prefer` that opens, and a call that tier
+    // cannot run falls to the tiers after it. `webgpu` alone is required; `auto` and `webgl2`
+    // keep the CPU tier for the calls they cannot run, such as the ones that take an array of
+    // strides. A `GPUDevice` the application hands in keeps every later tier as the fallback:
+    // `createDevice({ device })` takes no `prefer` beside it (TypeShade be90a21).
+    const shade = await createDevice(
+      options.gpuDevice !== undefined
+        ? { device: options.gpuDevice, poolBytes }
+        : {
+            prefer:
+              preference === "auto"
                 ? ["webgpu", "cpu"]
-                : ["webgpu"],
-      });
-    } catch (error) {
-      runtime?.destroy();
-      resetConfiguration();
-      throw error;
-    }
-    // On WebGL2 the calls make a context of their own.
-    if (name === "webgl2") runtime!.destroy();
-    const device = new Device(
+                : preference === "webgl2"
+                  ? ["webgl2", "cpu"]
+                  : [preference],
+            poolBytes,
+          },
+    );
+    const name: ExecutionTier = shade.tier;
+    const fallbackReason =
+      preference === "auto" && shade.skipped.length > 0
+        ? shade.skipped.map((s) => `${s.tier}: ${s.reason}`).join("; ")
+        : undefined;
+    return new Device(
       {
         provider: "typeshade",
         name,
         ...(fallbackReason ? { fallbackReason } : {}),
       },
-      poolBytes,
-      name === "webgpu" ? runtime : undefined,
+      shade,
     );
-    activeDevice = device;
-    return device;
   }
 
   /** The report of the last plan a `data()` ran, or undefined before the first. */
@@ -166,6 +147,11 @@ export class Device {
 
   clearReports(): void {
     this.history.length = 0;
+  }
+
+  /** What the TypeShade device owner counts of the arrays: live, pooled, allocations, reuses. */
+  get statistics(): ShadeDevice["statistics"] {
+    return this.shade.statistics;
   }
 
   tensor(
@@ -256,52 +242,25 @@ export class Device {
     source.storage = undefined;
   }
 
-  /** @internal Give back the array of a tensor, which the device reuses or frees. */
+  /**
+   * @internal Give back the array of a tensor, which the device reuses or frees. After
+   * `dispose()` the owner has freed every array, and a tensor that outlives the device gives
+   * back nothing.
+   */
   release(tensor: Tensor): void {
     const array = tensor.storage;
     if (array === undefined) return;
     tensor.storage = undefined;
-    this.memory.recycle(array);
+    if (!this.disposed) this.memory.recycle(array);
   }
 
-  /** The array for `length` values: a pooled one, with `values` written to it, or a new one. */
-  private acquire(
-    length: number,
-    values?: Float32Array,
-  ): Resident<Float32Array> {
-    const pooled = this.takeFree(length);
-    if (pooled !== undefined) {
-      // A pooled array is written only where the caller gives values; an output is overwritten.
-      if (values !== undefined) pooled.write(values);
-      return pooled;
-    }
-    const array = resident(values ?? new Float32Array(length));
-    this.live.set(array, length);
-    return array;
-  }
-
-  private takeFree(length: number): Resident<Float32Array> | undefined {
-    const list = this.free.get(length);
-    const array = list?.pop();
-    if (list !== undefined && list.length === 0) this.free.delete(length);
-    if (array !== undefined)
-      this.pooledBytes -= length * Float32Array.BYTES_PER_ELEMENT;
-    return array;
-  }
-
-  /** Keep a released array for reuse while the pool has room, and free it otherwise. */
-  private recycle(array: Resident<Float32Array>): void {
-    const length = this.live.get(array);
-    if (length === undefined) return;
-    const bytes = length * Float32Array.BYTES_PER_ELEMENT;
-    if (this.pooledBytes + bytes > this.poolBytes) {
-      this.memory.drop(array);
-      return;
-    }
-    const list = this.free.get(length);
-    if (list === undefined) this.free.set(length, [array]);
-    else list.push(array);
-    this.pooledBytes += bytes;
+  /**
+   * @internal A resident array of `values` that this device owns, for what is not a Tensor: the
+   * shards of a dataset. The caller destroys it.
+   */
+  keep<T extends Uint32Array | Float32Array>(values: T): Resident<T> {
+    this.assertUsable();
+    return this.shade.array(values);
   }
 
   async dispose(): Promise<void> {
@@ -309,14 +268,9 @@ export class Device {
     this.disposing = true;
     await Promise.allSettled([...this.pending]);
     this.disposed = true;
-    // The pooled arrays are in `live` too, so each is destroyed once here.
-    for (const array of this.live.keys()) array.destroy();
-    this.live.clear();
-    this.free.clear();
-    this.pooledBytes = 0;
-    this.runtime?.destroy();
-    resetConfiguration();
-    if (activeDevice === this) activeDevice = undefined;
+    // The owner destroys every array it holds, pooled or not, each once, and the WebGPU device it
+    // requested; a GPUDevice the application handed in is left as it is.
+    await this.shade.dispose();
   }
 
   /** @internal Create a dataset of device-resident sources; see `DeviceDataset`. */
@@ -330,18 +284,10 @@ export class Device {
    * the device is not WebGPU or does not report it.
    */
   storageBindingLimit(): number | undefined {
-    const gpu = this.runtime?.device as
-      | {
-          readonly limits?: {
-            readonly maxStorageBufferBindingSize?: number;
-            readonly maxBufferSize?: number;
-          };
-        }
-      | undefined;
-    const binding = gpu?.limits?.maxStorageBufferBindingSize;
+    const binding = this.shade.limits["maxStorageBufferBindingSize"];
     if (typeof binding !== "number") return undefined;
     // A shard is one buffer, so it also fits maxBufferSize.
-    const buffer = gpu?.limits?.maxBufferSize;
+    const buffer = this.shade.limits["maxBufferSize"];
     return typeof buffer === "number" ? Math.min(binding, buffer) : binding;
   }
 
@@ -357,36 +303,8 @@ export class Device {
   }
 }
 
-/** The device and the order of tiers TypeShade's call layer has before a TypeNN device. */
-function resetConfiguration(): void {
-  configure({ runtime: null });
-  configure({});
-}
-
 function isDevicePreference(value: string): value is DevicePreference {
   return ["auto", "webgpu", "webgl2", "cpu"].includes(value);
-}
-
-/** The program runtime that holds the device the calls run on, if the preference names a GPU. */
-async function selectRuntime(
-  preference: DevicePreference,
-  gpuDevice: object | undefined,
-): Promise<{ runtime?: Runtime; fallbackReason?: string }> {
-  if (preference === "cpu") return {};
-  try {
-    return {
-      runtime: await createRuntime(
-        gpuDevice !== undefined
-          ? { device: gpuDevice }
-          : { prefer: [preference === "auto" ? "webgpu" : preference] },
-      ),
-    };
-  } catch (error) {
-    if (preference !== "auto") throw error;
-    return {
-      fallbackReason: error instanceof Error ? error.message : String(error),
-    };
-  }
 }
 
 export async function device(
