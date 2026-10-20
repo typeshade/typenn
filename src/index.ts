@@ -21,6 +21,7 @@ export {
   Tensor,
   type Conv2DOptions,
   type Pool2DOptions,
+  type SamplingOptions,
 } from "./tensor/tensor.js";
 export { graph, type GraphNode, type GraphSnapshot } from "./tensor/inspect.js";
 export { gradients } from "./autograd.js";
@@ -109,6 +110,8 @@ export {
   neg,
   relu,
   relu6,
+  resizeBilinear,
+  gridSampleNHWC,
   reciprocal,
   reshape,
   round,
