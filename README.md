@@ -44,6 +44,13 @@ const logits = model.forward(device.tensor(pixels, { shape: [1, 784] }));
 const probabilities = await logits.softmax().data();
 ```
 
+## Website ownership
+
+The TypeNN website at [nn.typeshade.dev](https://nn.typeshade.dev) is maintained in the
+[TypeShade web repository](https://github.com/typeshade/web/tree/main/apps/typenn). This repository
+owns the TypeNN library, its tests, and npm releases. Keep website source, website-only dependencies,
+and deployment configuration in the web repository.
+
 ## How a read runs
 
 An operation does not compute. It records a node. The node holds the kernel function, the input

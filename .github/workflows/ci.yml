@@ -28,9 +28,6 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm test
-      # The browser's Keras decoder against scripts/keras-expected.json. It downloads about 60 MB of
-      # source files from the Keras storage and needs no website dependency.
-      - run: npm run test:keras --prefix website
 
   gpu:
     name: gpu (Chromium, WebGPU on SwiftShader)
