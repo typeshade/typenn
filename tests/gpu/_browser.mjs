@@ -1,9 +1,8 @@
 // Chromium with WebGPU for the GPU tests: the built library in `dist/`, the test modules in
 // `tests/` and the bundled MNIST example are served from this repository, and a page runs a
-// function of a test in the browser. TYPESHADE_CHROMIUM names the executable (locally
-// /opt/pw-browsers/chromium-1194/chrome-linux/chrome, Chromium 141); left out, Playwright's own
-// is used, which CI installs. WebGPU is software here: SwiftShader, as in TypeShade's own gates,
-// so a test holds a plan and a value, and never a time.
+// function of a test in the browser. TYPESHADE_CHROMIUM names the executable; left out,
+// Playwright's own is used, which CI installs. WebGPU uses SwiftShader by default. A test that
+// passes `{ hardware: true }` launches the named browser against its hardware adapter instead.
 
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
