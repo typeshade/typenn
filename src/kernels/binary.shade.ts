@@ -260,7 +260,7 @@ export function minimumStrided(
 
 export function power(out: array<f32>, a: array<f32>, b: array<f32>): void {
   for (let i: u32 = 0; i < out.length; i++) {
-    out[i] = pow(a[i], b[i]);
+    out[i] = a[i] ** b[i];
   }
 }
 
@@ -273,7 +273,7 @@ export function powerExpand(
   bStrides: array<u32, 8>,
 ): void {
   for (let i: u32 = 0; i < out.length; i++) {
-    out[i] = pow(a[i], b[operandIndex(i, rank, dims, bStrides)]);
+    out[i] = a[i] ** b[operandIndex(i, rank, dims, bStrides)];
   }
 }
 
@@ -287,10 +287,9 @@ export function powerStrided(
   bStrides: array<u32, 8>,
 ): void {
   for (let i: u32 = 0; i < out.length; i++) {
-    out[i] = pow(
-      a[operandIndex(i, rank, dims, aStrides)],
-      b[operandIndex(i, rank, dims, bStrides)],
-    );
+    out[i] =
+      a[operandIndex(i, rank, dims, aStrides)] **
+      b[operandIndex(i, rank, dims, bStrides)];
   }
 }
 
@@ -402,9 +401,9 @@ export function binaryGrad(
         }
       } else if (operation === BinaryOperation.Power) {
         if (wrtA === 1) {
-          total += upstream * bv * pow(av, bv - 1.0);
+          total += upstream * bv * av ** (bv - 1.0);
         } else {
-          total += upstream * pow(av, bv) * log(av);
+          total += upstream * av ** bv * log(av);
         }
       } else if (operation === BinaryOperation.PRelu) {
         if (wrtA === 1 && av >= 0.0) {
