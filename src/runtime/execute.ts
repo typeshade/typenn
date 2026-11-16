@@ -1,5 +1,5 @@
 import type { FuseReport, FuseScope } from "typeshade/fuse";
-import { type Resident } from "typeshade/runtime";
+import type { Buffer, f32 } from "typeshade/runtime";
 import { postOrder } from "../autograd/graph.js";
 import { copy } from "../kernels/map.shade.ts";
 import type { OpNode } from "../tensor/node.js";
@@ -10,16 +10,16 @@ import type { Tensor } from "../tensor/tensor.js";
 /** What the executor asks of the device that owns the arrays. */
 export interface Memory {
   /** A resident array that holds a copy of `values`, owned by the device until it is recycled. */
-  keep(values: Float32Array): Resident<Float32Array>;
+  keep(values: Float32Array): Buffer<f32>;
   /**
    * A resident array of `length` values for a kernel to write. Its contents are whatever it held
    * before: a kernel call writes every element of its output, so the device need not zero it.
    */
-  output(length: number): Resident<Float32Array>;
+  output(length: number): Buffer<f32>;
   /** Free an array made by `keep` or `output` now. */
-  drop(array: Resident<Float32Array>): void;
+  drop(array: Buffer<f32>): void;
   /** Give back an array no Tensor holds. The device reuses it, or frees it. */
-  recycle(array: Resident<Float32Array>): void;
+  recycle(array: Buffer<f32>): void;
   /** Keep the report of a plan, and the graph id of each of its kernel calls, in call order. */
   record(report: FuseReport, nodes: readonly number[]): void;
   /** Run `body` as one plan on the device that owns the arrays (`device.fuse()`, change 0071). */
@@ -113,8 +113,8 @@ function distinct(
   scope: FuseScope,
   inputs: readonly Tensor[],
   onCopy: () => void,
-): Resident<Float32Array>[] {
-  const seen = new Set<Resident<Float32Array>>();
+): Buffer<f32>[] {
+  const seen = new Set<Buffer<f32>>();
   return inputs.map((input) => {
     const array = input.storage!;
     if (!seen.has(array)) {

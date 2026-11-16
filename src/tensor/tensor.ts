@@ -1,4 +1,4 @@
-import type { Resident } from "typeshade/runtime";
+import type { Buffer, f32 } from "typeshade/runtime";
 import type { Device } from "../runtime/device.js";
 import type { Shape } from "./shape.js";
 import { topologicalOrder } from "../autograd/graph.js";
@@ -37,7 +37,7 @@ export class Tensor {
    * @internal The resident array that holds the value. A plan makes it when it computes the
    * tensor, and the first plan that reads a tensor the caller made uploads it.
    */
-  storage?: Resident<Float32Array>;
+  storage?: Buffer<f32>;
   /**
    * @internal True when `storage` holds a newer value than the host copy of an input tensor. An
    * optimizer step sets it; `hostValues()` reads the array back once and clears it.
@@ -303,7 +303,7 @@ export class Tensor {
       throw new RangeError("Parameter assignment must preserve tensor size.");
     this.node.value.set(values);
     this.hostStale = false;
-    this.storage?.write(this.node.value);
+    this.storage?.set(this.node.value);
   }
 
   /**

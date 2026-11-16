@@ -2,7 +2,7 @@ import type { Tensor } from "./tensor.js";
 
 /**
  * A kernel function of `src/kernels`, called as `kernel(out, ...arrays, ...values)`: `out` and
- * the arrays are `Resident` arrays, and the values follow them.
+ * the arrays are `Buffer` arrays, and the values follow them.
  */
 export type Kernel = (out: any, ...rest: any[]) => unknown;
 
@@ -36,7 +36,7 @@ export interface OpNode {
   readonly kernel: Kernel;
   readonly inputs: readonly Tensor[];
   /**
-   * Resident arrays the call takes after its inputs: a device dataset's source and permutation,
+   * Buffer arrays the call takes after its inputs: a device dataset's source and permutation,
    * which are not Tensors. They are read, never freed, by the graph.
    */
   readonly arrays?: readonly object[];

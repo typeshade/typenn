@@ -1,7 +1,9 @@
 import {
   createDevice,
   type Device as ShadeDevice,
-  type Resident,
+  type Buffer,
+  type f32,
+  type u32,
 } from "typeshade/runtime";
 // The planner. `device.fuse()` runs through the slot this import fills (TypeShade change 0071,
 // Amendment 1): the runtime ships none of the planner, so the application imports it once.
@@ -57,8 +59,8 @@ export class Device {
   private readonly memory: Memory = {
     keep: (values) => this.shade.array(values),
     output: (length) => this.shade.array(length, "f32"),
-    // A handle the host destroys leaves the owner's books; a second destroy is a no-op.
-    drop: (array) => array.destroy(),
+    // A disposed handle leaves the owner's books; a second disposal is a no-op.
+    drop: (array) => array.dispose(),
     recycle: (array) => this.shade.release(array),
     fuse: (body) => this.shade.fuse(body),
     record: (report, nodes) => {
@@ -256,11 +258,16 @@ export class Device {
 
   /**
    * @internal A resident array of `values` that this device owns, for what is not a Tensor: the
-   * shards of a dataset. The caller destroys it.
+   * shards of a dataset. The caller disposes it.
    */
-  keep<T extends Uint32Array | Float32Array>(values: T): Resident<T> {
+  keep(values: Float32Array): Buffer<f32>;
+  keep(values: Uint32Array): Buffer<u32>;
+  keep(values: Float32Array | Uint32Array): Buffer<f32> | Buffer<u32>;
+  keep(values: Float32Array | Uint32Array): Buffer<f32> | Buffer<u32> {
     this.assertUsable();
-    return this.shade.array(values);
+    return values instanceof Float32Array
+      ? this.shade.array(values)
+      : this.shade.array(values);
   }
 
   async dispose(): Promise<void> {
