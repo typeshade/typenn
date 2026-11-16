@@ -378,7 +378,7 @@ test("residency: a sample larger than a shard is reported and batches are built 
 });
 
 // Measures the uploads of one step with the fake WebGPU device. A step is one batch: its inputs and
-// its labels. Both are first used by the warm-up, since the first use of a Resident uploads it
+// its labels. Both are first used by the warm-up, since the first use of a Buffer uploads it
 // (the permutation and the source words are uploaded once, at the first batch that reads them).
 // The step then sends scalars only: no upload is as large as one permutation, and the total does
 // not depend on N.
@@ -528,7 +528,7 @@ test("order: a batch made before a new order never reads the new order", async (
     train: { count: 4, x, y },
     test: { count: 4, x, y },
   };
-  // On the CPU tier a Resident still holds its host copy, so the old batch reads the old order.
+  // On the CPU tier a Buffer still holds its host copy, so the old batch reads the old order.
   const cpu = await nn.device({ device: "cpu" });
   const cpuData = cpu.dataset(options);
   const cpuBefore = cpuData.batch(0, 2);
@@ -537,7 +537,7 @@ test("order: a batch made before a new order never reads the new order", async (
   assert.deepEqual(await values(cpuData.batch(0, 2).labels), [3, 2]);
   cpuData.dispose();
   await cpu.dispose();
-  // On WebGPU the old order is destroyed, so computing the old batch throws.
+  // On WebGPU the old order is disposed, so computing the old batch throws.
   const fake = fakeGpu();
   const gpu = await nn.device({ device: "webgpu", gpuDevice: fake.device });
   const gpuData = gpu.dataset(options);
@@ -545,7 +545,7 @@ test("order: a batch made before a new order never reads the new order", async (
   await computed.labels.data();
   const gpuBefore = gpuData.batch(0, 2);
   gpuData.order([3, 2, 1, 0]);
-  await assert.rejects(gpuBefore.labels.data(), /destroyed/);
+  await assert.rejects(gpuBefore.labels.data(), /Buffer was disposed/);
   gpuData.dispose();
   await gpu.dispose();
 });

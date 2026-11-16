@@ -1,4 +1,4 @@
-import type { Resident } from "typeshade/runtime";
+import type { Buffer, f32, u32 } from "typeshade/runtime";
 import type { Device } from "../runtime/device.js";
 import {
   bagOfWords,
@@ -106,10 +106,10 @@ interface Field {
   readonly shards: readonly {
     readonly first: number;
     readonly rows: number;
-    readonly words: Resident<Uint32Array>;
+    readonly words: Buffer<u32>;
   }[];
-  readonly mean: Resident<Float32Array>;
-  readonly std: Resident<Float32Array>;
+  readonly mean: Buffer<f32>;
+  readonly std: Buffer<f32>;
 }
 
 /** The device state of one split. */
@@ -117,14 +117,14 @@ interface DeviceSplitState {
   readonly input:
     | Field
     | {
-        readonly tokens: Resident<Uint32Array>;
+        readonly tokens: Buffer<u32>;
         readonly perWord: number;
         readonly width: 16 | 32;
-        readonly offsets: Resident<Uint32Array>;
+        readonly offsets: Buffer<u32>;
       };
   readonly labels: Field;
   /** The row order of the split: the permutation the batches are taken from. */
-  perm: Resident<Uint32Array>;
+  perm: Buffer<u32>;
 }
 
 /** The split as the dataset holds it: the host copy, the order, and the device state if any. */
@@ -300,7 +300,7 @@ export class DeviceDataset {
     readonly test: SplitState;
   };
   private readonly handles: {
-    readonly resident: Resident<unknown>;
+    readonly resident: Pick<Buffer<f32>, "dispose">;
     readonly bytes: number;
   }[] = [];
   private readonly labelShape: (count: number) => number[];
@@ -360,7 +360,7 @@ export class DeviceDataset {
         return;
       } catch (error) {
         for (const { resident: handle } of this.handles.splice(0))
-          handle.destroy();
+          handle.dispose();
         throw error;
       }
     }
@@ -420,7 +420,7 @@ export class DeviceDataset {
     this.splits.train.order.set(order);
     const device = this.splits.train.device;
     if (device !== undefined) {
-      // A new Resident for each order. A batch made before this call still names the old one, so
+      // A new Buffer for each order. A batch made before this call still names the old one, so
       // computing it now throws, and never reads the new order under the rows of the old.
       const stale = device.perm;
       device.perm = this.keep(order);
@@ -459,7 +459,7 @@ export class DeviceDataset {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
-    for (const { resident: handle } of this.handles.splice(0)) handle.destroy();
+    for (const { resident: handle } of this.handles.splice(0)) handle.dispose();
   }
 
   private makeBatch(
@@ -502,7 +502,7 @@ export class DeviceDataset {
   /** The gather of a field: one kernel call per shard, each changing only the rows of its shard. */
   private gatherChain(
     field: Field,
-    perm: Resident<Uint32Array>,
+    perm: Buffer<u32>,
     start: number,
     shape: readonly number[],
   ): Tensor {
@@ -532,12 +532,12 @@ export class DeviceDataset {
 
   private bagChain(
     text: {
-      readonly tokens: Resident<Uint32Array>;
+      readonly tokens: Buffer<u32>;
       readonly perWord: number;
       readonly width: 16 | 32;
-      readonly offsets: Resident<Uint32Array>;
+      readonly offsets: Buffer<u32>;
     },
-    perm: Resident<Uint32Array>,
+    perm: Buffer<u32>,
     start: number,
     count: number,
   ): Tensor {
@@ -701,7 +701,7 @@ export class DeviceDataset {
     const shards: {
       first: number;
       rows: number;
-      words: Resident<Uint32Array>;
+      words: Buffer<u32>;
     }[] = [];
     for (let first = 0; first < count; first += rows) {
       const shardRows = Math.min(rows, count - first);
@@ -724,17 +724,19 @@ export class DeviceDataset {
     };
   }
 
-  /** Destroy a Resident that `keep` made, and stop counting its bytes. */
-  private release(handle: Resident<Uint32Array>): void {
+  /** Dispose a Buffer that `keep` made, and stop counting its bytes. */
+  private release(handle: Buffer<u32>): void {
     const at = this.handles.findIndex((h) => h.resident === handle);
     if (at >= 0) this.handles.splice(at, 1);
-    handle.destroy();
+    handle.dispose();
   }
 
-  private keep<T extends Uint32Array | Float32Array>(array: T): Resident<T> {
+  private keep(array: Float32Array): Buffer<f32>;
+  private keep(array: Uint32Array): Buffer<u32>;
+  private keep(array: Float32Array | Uint32Array): Buffer<f32> | Buffer<u32> {
     const handle = this.device.keep(array);
     this.handles.push({
-      resident: handle as Resident<unknown>,
+      resident: handle,
       bytes: array.byteLength,
     });
     return handle;

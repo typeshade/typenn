@@ -58,7 +58,7 @@ Tensors, the scalars the kernel function takes by value, and the gradient rule. 
 these steps:
 
 1. Collect the nodes under the Tensor that have no array yet, in graph order.
-2. Take one `Resident` array for each node from the TypeShade device (`device.array()`), which gives
+2. Take one `Buffer` array for each node from the TypeShade device (`device.array()`), which gives
    a released array of the same length back or makes one. Upload each leaf that has no array yet.
 3. Call `device.fuse()` of the TypeShade device with a body that calls
    `kernel(out, ...inputs, ...values)` for each node.
@@ -86,7 +86,7 @@ Three facts end a group in the plans that the tests assert:
 - A call reads, at an index other than `i`, an array that the call before it wrote (F3). `matmul`
   and the strided forms of the binary operations do this.
 - One dispatch would bind more storage buffers than the device allows, 8 by default (F5). Every
-  operation output is a `Resident` array, so a long chain of distinct inputs splits.
+  operation output is a `Buffer` array, so a long chain of distinct inputs splits.
 
 `group.why` says why a group stands apart from the group before it, with the source line.
 `device.reports` keeps the last 256 reports, oldest first, and `device.clearReports()` empties it.
@@ -97,7 +97,7 @@ other. The report then has `dispatches: 0`, `submissions: 0` and one group for e
 
 A Tensor keeps its array after a read, so a later `data()` of it, or of a Tensor under it, adds no
 dispatch for it. A call that takes one Tensor twice, such as `a.add(a)`, reads the second one from a
-copy in a scratch array. One `Resident` must not be two parameters of one call. If a plan fails,
+copy in a scratch array. One `Buffer` must not be two parameters of one call. If a plan fails,
 TypeNN frees the arrays of that plan and rethrows the error. The next `data()` computes them again.
 
 ### The pool of released arrays
@@ -172,7 +172,7 @@ leaves TypeShade's process-global `configure()` as the application set it.
 
 The kernel functions are in `src/kernels`. Each is an exported TypeShade function with at least one
 `array<f32>` parameter and one loop that writes `out[i]` (TypeShade Rule 8.22). The host calls it as
-`kernel(out, ...arrays, ...values)`. `out` and the arrays are `Resident` arrays. The scalars and the
+`kernel(out, ...arrays, ...values)`. `out` and the arrays are `Buffer` arrays. The scalars and the
 fixed-size arrays follow them, by value. `vite.config.ts` builds them with `typeshade({ fuse: true })`.
 
 | File               | Kernel functions                                                                                                                                                                                                                                          |
@@ -358,7 +358,7 @@ unsupported, and ask for the missing rule by name when called.
 ## Measurements
 
 Each measurement names the commit it was taken on. The sections below are historical. The build
-pins TypeShade `be90a21` now, and no time was measured on that pin. "Pin 96dbaa9" holds the last
+pins TypeShade `58e8187a` now, and no time was measured on that pin. "Pin 96dbaa9" holds the last
 times, on the pin before. A row that names an older commit or pin is a record of that commit, and
 the current code may differ.
 

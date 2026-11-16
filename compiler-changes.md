@@ -14,3 +14,9 @@ then the pull request that did the work.
   the single-device guard and the limits cast are gone. The proposal names `typenn` in its expected
   work, not under `downstream`; the registration of `typenn` as a downstream repository is
   typeshade/typeshade#681.
+
+- 0138, pull request #27 (milestone 4 slice 1): tensor and dataset storage use
+  `Buffer<f32>` and `Buffer<u32>`, `set` and `dispose`, with typed-array reads.
+  Stale parameter assignment reads its device value before replacing it, as the Buffer
+  contract requires. The pin is the slice candidate `58e8187a`; the legacy device fuse
+  scope remains until milestone 4 slice 5. This records slice 1 only, not the later graph migration.
