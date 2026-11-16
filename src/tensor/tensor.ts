@@ -301,6 +301,12 @@ export class Tensor {
       );
     if (values.length !== this.node.value.length)
       throw new RangeError("Parameter assignment must preserve tensor size.");
+    // Buffer.set requires a device-written value to land before the host replaces it.
+    // Read the storage directly so the caller's replacement can alias node.value safely.
+    if (this.hostStale) {
+      await this.storage!.read();
+      this.assertUsable();
+    }
     this.node.value.set(values);
     this.hostStale = false;
     this.storage?.set(this.node.value);

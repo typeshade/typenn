@@ -537,7 +537,7 @@ test("order: a batch made before a new order never reads the new order", async (
   assert.deepEqual(await values(cpuData.batch(0, 2).labels), [3, 2]);
   cpuData.dispose();
   await cpu.dispose();
-  // On WebGPU the old order is destroyed, so computing the old batch throws.
+  // On WebGPU the old order is disposed, so computing the old batch throws.
   const fake = fakeGpu();
   const gpu = await nn.device({ device: "webgpu", gpuDevice: fake.device });
   const gpuData = gpu.dataset(options);
@@ -545,7 +545,7 @@ test("order: a batch made before a new order never reads the new order", async (
   await computed.labels.data();
   const gpuBefore = gpuData.batch(0, 2);
   gpuData.order([3, 2, 1, 0]);
-  await assert.rejects(gpuBefore.labels.data(), /destroyed/);
+  await assert.rejects(gpuBefore.labels.data(), /Buffer was disposed/);
   gpuData.dispose();
   await gpu.dispose();
 });
