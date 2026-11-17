@@ -6,7 +6,7 @@
 // edge is not in it: a maximum is of the elements inside, and an average divides by their count.
 
 export function maxPool(
-  @inout out: array<f32>,
+  out: array<f32>,
   source: array<f32>,
   height: u32,
   width: u32,
@@ -54,7 +54,7 @@ export function maxPool(
 }
 
 export function avgPool(
-  @inout out: array<f32>,
+  out: array<f32>,
   source: array<f32>,
   height: u32,
   width: u32,
@@ -104,7 +104,7 @@ export function avgPool(
  * greatest element of.
  */
 export function maxPoolGrad(
-  @inout out: array<f32>,
+  out: array<f32>,
   source: array<f32>,
   dy: array<f32>,
   height: u32,
@@ -191,7 +191,7 @@ export function maxPoolGrad(
 
 /** The gradient of `avgPool` with respect to its input: each window shares its gradient. */
 export function avgPoolGrad(
-  @inout out: array<f32>,
+  out: array<f32>,
   dy: array<f32>,
   height: u32,
   width: u32,

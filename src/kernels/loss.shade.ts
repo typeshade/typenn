@@ -6,7 +6,7 @@
 
 /** The loss of each row: `out` has one element for each row. */
 export function softmaxCrossEntropy(
-  @inout out: array<f32>,
+  out: array<f32>,
   logits: array<f32>,
   labels: array<f32>,
   columns: u32,
@@ -31,7 +31,7 @@ export function softmaxCrossEntropy(
 
 /** The gradient of the loss with respect to the logits; `dy` has the loss of each row. */
 export function crossEntropyLogitsGrad(
-  @inout out: array<f32>,
+  out: array<f32>,
   logits: array<f32>,
   labels: array<f32>,
   dy: array<f32>,
@@ -57,7 +57,7 @@ export function crossEntropyLogitsGrad(
 
 /** The gradient of the loss with respect to the labels. */
 export function crossEntropyLabelsGrad(
-  @inout out: array<f32>,
+  out: array<f32>,
   logits: array<f32>,
   dy: array<f32>,
   columns: u32,
@@ -82,7 +82,7 @@ export function crossEntropyLabelsGrad(
  * below 2^24. Each row is computed as the one-hot kernel computes it, so the two give one value.
  */
 export function sparseSoftmaxCrossEntropy(
-  @inout out: array<f32>,
+  out: array<f32>,
   logits: array<f32>,
   classes: array<f32>,
   columns: u32,
@@ -104,7 +104,7 @@ export function sparseSoftmaxCrossEntropy(
 
 /** The gradient of the class-id loss with respect to the logits; `dy` has the loss of each row. */
 export function sparseCrossEntropyGrad(
-  @inout out: array<f32>,
+  out: array<f32>,
   logits: array<f32>,
   classes: array<f32>,
   dy: array<f32>,
