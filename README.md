@@ -281,7 +281,7 @@ current Tensor-graph gradient rules.
 
 TypeShade owns the shader language and the GPU execution runtime. TypeNN's `.shade.ts` kernel
 functions are compiled during the library build. Applications use TypeNN's Tensor and Module API
-and do not author shaders. The build pins TypeShade to the source commit `f149b403`, which has
+and do not author shaders. The build pins TypeShade to the source commit `c63d8936`, which has
 `createDevice()` (change 0071) and `Buffer` (change 0138), because TypeShade's npm registry
 package is still a placeholder.
 
@@ -359,8 +359,8 @@ unsupported, and ask for the missing rule by name when called.
 ## Measurements
 
 Each measurement names the commit it was taken on. The sections below are historical. The build
-pins TypeShade `f149b403` now, and no time was measured on that pin. "Pin 96dbaa9" holds the last
-times, on the pin before. A row that names an older commit or pin is a record of that commit, and
+pins TypeShade `c63d8936` now. No time was measured on that pin or on `f149b403`, the pin before
+it. "Pin 96dbaa9" holds the last times, on an earlier pin. A row that names an older commit or pin is a record of that commit, and
 the current code may differ.
 
 ### Pin 96dbaa9

@@ -8,7 +8,7 @@
 
 /** `out = param - lr * grad`: stochastic gradient descent. */
 export function sgdUpdate(
-  @inout out: array<f32>,
+  out: array<f32>,
   param: array<f32>,
   grad: array<f32>,
   lr: f32,
@@ -23,7 +23,7 @@ export function sgdUpdate(
 
 /** The new first moment: `beta1 * m + keep * grad`, where `keep` is `1 - beta1`. */
 export function adamFirst(
-  @inout out: array<f32>,
+  out: array<f32>,
   m: array<f32>,
   grad: array<f32>,
   beta1: f32,
@@ -36,7 +36,7 @@ export function adamFirst(
 
 /** The new second moment: `beta2 * v + keep * grad * grad`, where `keep` is `1 - beta2`. */
 export function adamSecond(
-  @inout out: array<f32>,
+  out: array<f32>,
   v: array<f32>,
   grad: array<f32>,
   beta2: f32,
@@ -52,7 +52,7 @@ export function adamSecond(
  * corrections of the step and `m` and `v` are the new moments.
  */
 export function adamUpdate(
-  @inout out: array<f32>,
+  out: array<f32>,
   param: array<f32>,
   m: array<f32>,
   v: array<f32>,

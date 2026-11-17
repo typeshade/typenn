@@ -39,7 +39,7 @@ function featureValue(
  * before them in `prev`, and change only the rows of their own shard.
  */
 export function gatherFirst(
-  @inout out: array<f32>,
+  out: array<f32>,
   perm: array<u32>,
   words: array<u32>,
   center: array<f32>,
@@ -74,7 +74,7 @@ export function gatherFirst(
 
 /** As `gatherFirst`, and the rows outside this shard keep the value of `prev`. */
 export function gatherNext(
-  @inout out: array<f32>,
+  out: array<f32>,
   prev: array<f32>,
   perm: array<u32>,
   words: array<u32>,
@@ -114,7 +114,7 @@ export function gatherNext(
  * `s`. Tokens at or above `vocab` match no output.
  */
 export function bagOfWords(
-  @inout out: array<f32>,
+  out: array<f32>,
   perm: array<u32>,
   tokens: array<u32>,
   offsets: array<u32>,

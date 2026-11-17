@@ -59,3 +59,10 @@ or found.
   (`tests/buffer-pool.test.mjs`).
 - 0130, pull request #28: nothing changed. No file of `src/` has a stage call or a stage
   attribute.
+
+The pull request #29 moved the pin from `f149b403` to `c63d8936`.
+
+- 0142, pull request #29: every `@inout` of `src/kernels/*.shade.ts` is deleted. Each one was on
+  an `array<f32>` parameter, so no kernel body changed. No file of this repository wrote `@out`.
+  The proposal is `accepted`, not `implemented`, at `c63d8936`, so `scripts/downstream-impact.ts`
+  does not list it yet. It is recorded here because the pin passes its removal of `@inout`.
