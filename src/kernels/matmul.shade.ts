@@ -6,7 +6,7 @@
  * as [inner, rows], and `transposeB` that `b` is stored as [cols, inner]. Each is 0 or 1.
  */
 export function matmul(
-  out: array<f32>,
+  @inout out: array<f32>,
   a: array<f32>,
   b: array<f32>,
   rows: u32,

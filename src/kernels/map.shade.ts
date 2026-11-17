@@ -6,63 +6,63 @@
 // that calls it, so a map is called `<operation>Map`. `copy`, `relu` and `reluGrad` are no builtins.
 
 /** `out = x`: reshape, and the copy that makes a repeated operand a second array. */
-export function copy(out: array<f32>, x: array<f32>): void {
+export function copy(@inout out: array<f32>, x: array<f32>): void {
   for (let i: u32 = 0; i < out.length; i++) {
     out[i] = x[i];
   }
 }
 
-export function relu(out: array<f32>, x: array<f32>): void {
+export function relu(@inout out: array<f32>, x: array<f32>): void {
   for (let i: u32 = 0; i < out.length; i++) {
     out[i] = max(x[i], 0.0);
   }
 }
 
 /** The gradient of `relu` at `x`: `dy` where `x` is positive, 0 elsewhere. */
-export function reluGrad(out: array<f32>, x: array<f32>, dy: array<f32>): void {
+export function reluGrad(@inout out: array<f32>, x: array<f32>, dy: array<f32>): void {
   for (let i: u32 = 0; i < out.length; i++) {
     out[i] = select(0.0, dy[i], x[i] > 0.0);
   }
 }
 
-export function negMap(out: array<f32>, x: array<f32>): void {
+export function negMap(@inout out: array<f32>, x: array<f32>): void {
   for (let i: u32 = 0; i < out.length; i++) {
     out[i] = -x[i];
   }
 }
 
-export function absMap(out: array<f32>, x: array<f32>): void {
+export function absMap(@inout out: array<f32>, x: array<f32>): void {
   for (let i: u32 = 0; i < out.length; i++) {
     out[i] = abs(x[i]);
   }
 }
 
-export function squareMap(out: array<f32>, x: array<f32>): void {
+export function squareMap(@inout out: array<f32>, x: array<f32>): void {
   for (let i: u32 = 0; i < out.length; i++) {
     out[i] = x[i] * x[i];
   }
 }
 
-export function sqrtMap(out: array<f32>, x: array<f32>): void {
+export function sqrtMap(@inout out: array<f32>, x: array<f32>): void {
   for (let i: u32 = 0; i < out.length; i++) {
     out[i] = sqrt(x[i]);
   }
 }
 
-export function expMap(out: array<f32>, x: array<f32>): void {
+export function expMap(@inout out: array<f32>, x: array<f32>): void {
   for (let i: u32 = 0; i < out.length; i++) {
     out[i] = exp(x[i]);
   }
 }
 
-export function logMap(out: array<f32>, x: array<f32>): void {
+export function logMap(@inout out: array<f32>, x: array<f32>): void {
   for (let i: u32 = 0; i < out.length; i++) {
     out[i] = log(x[i]);
   }
 }
 
 /** The logistic function, written so that `exp` never sees a large positive argument. */
-export function sigmoidMap(out: array<f32>, x: array<f32>): void {
+export function sigmoidMap(@inout out: array<f32>, x: array<f32>): void {
   for (let i: u32 = 0; i < out.length; i++) {
     const v = x[i];
     let y: f32 = 0.0;
@@ -76,68 +76,68 @@ export function sigmoidMap(out: array<f32>, x: array<f32>): void {
   }
 }
 
-export function tanhMap(out: array<f32>, x: array<f32>): void {
+export function tanhMap(@inout out: array<f32>, x: array<f32>): void {
   for (let i: u32 = 0; i < out.length; i++) {
     out[i] = tanh(x[i]);
   }
 }
 
-export function floorMap(out: array<f32>, x: array<f32>): void {
+export function floorMap(@inout out: array<f32>, x: array<f32>): void {
   for (let i: u32 = 0; i < out.length; i++) {
     out[i] = floor(x[i]);
   }
 }
 
-export function ceilMap(out: array<f32>, x: array<f32>): void {
+export function ceilMap(@inout out: array<f32>, x: array<f32>): void {
   for (let i: u32 = 0; i < out.length; i++) {
     out[i] = ceil(x[i]);
   }
 }
 
-export function roundMap(out: array<f32>, x: array<f32>): void {
+export function roundMap(@inout out: array<f32>, x: array<f32>): void {
   for (let i: u32 = 0; i < out.length; i++) {
     out[i] = round(x[i]);
   }
 }
 
-export function signMap(out: array<f32>, x: array<f32>): void {
+export function signMap(@inout out: array<f32>, x: array<f32>): void {
   for (let i: u32 = 0; i < out.length; i++) {
     out[i] = sign(x[i]);
   }
 }
 
-export function reciprocalMap(out: array<f32>, x: array<f32>): void {
+export function reciprocalMap(@inout out: array<f32>, x: array<f32>): void {
   for (let i: u32 = 0; i < out.length; i++) {
     out[i] = 1.0 / x[i];
   }
 }
 
-export function rsqrtMap(out: array<f32>, x: array<f32>): void {
+export function rsqrtMap(@inout out: array<f32>, x: array<f32>): void {
   for (let i: u32 = 0; i < out.length; i++) {
     out[i] = inverseSqrt(x[i]);
   }
 }
 
-export function sinMap(out: array<f32>, x: array<f32>): void {
+export function sinMap(@inout out: array<f32>, x: array<f32>): void {
   for (let i: u32 = 0; i < out.length; i++) {
     out[i] = sin(x[i]);
   }
 }
 
-export function cosMap(out: array<f32>, x: array<f32>): void {
+export function cosMap(@inout out: array<f32>, x: array<f32>): void {
   for (let i: u32 = 0; i < out.length; i++) {
     out[i] = cos(x[i]);
   }
 }
 
-export function tanMap(out: array<f32>, x: array<f32>): void {
+export function tanMap(@inout out: array<f32>, x: array<f32>): void {
   for (let i: u32 = 0; i < out.length; i++) {
     out[i] = tan(x[i]);
   }
 }
 
 /** `exp(x) - 1`, with a series near 0 where the subtraction would lose digits. */
-export function expm1Map(out: array<f32>, x: array<f32>): void {
+export function expm1Map(@inout out: array<f32>, x: array<f32>): void {
   for (let i: u32 = 0; i < out.length; i++) {
     const v = x[i];
     let y: f32 = 0.0;
@@ -155,7 +155,7 @@ export function expm1Map(out: array<f32>, x: array<f32>): void {
 }
 
 /** `log(1 + x)`, with a series near 0 where the addition would lose digits. */
-export function log1pMap(out: array<f32>, x: array<f32>): void {
+export function log1pMap(@inout out: array<f32>, x: array<f32>): void {
   for (let i: u32 = 0; i < out.length; i++) {
     const v = x[i];
     let y: f32 = 0.0;
@@ -169,56 +169,56 @@ export function log1pMap(out: array<f32>, x: array<f32>): void {
   }
 }
 
-export function sinhMap(out: array<f32>, x: array<f32>): void {
+export function sinhMap(@inout out: array<f32>, x: array<f32>): void {
   for (let i: u32 = 0; i < out.length; i++) {
     out[i] = sinh(x[i]);
   }
 }
 
-export function coshMap(out: array<f32>, x: array<f32>): void {
+export function coshMap(@inout out: array<f32>, x: array<f32>): void {
   for (let i: u32 = 0; i < out.length; i++) {
     out[i] = cosh(x[i]);
   }
 }
 
-export function acosMap(out: array<f32>, x: array<f32>): void {
+export function acosMap(@inout out: array<f32>, x: array<f32>): void {
   for (let i: u32 = 0; i < out.length; i++) {
     out[i] = acos(x[i]);
   }
 }
 
-export function acoshMap(out: array<f32>, x: array<f32>): void {
+export function acoshMap(@inout out: array<f32>, x: array<f32>): void {
   for (let i: u32 = 0; i < out.length; i++) {
     out[i] = acosh(x[i]);
   }
 }
 
-export function asinMap(out: array<f32>, x: array<f32>): void {
+export function asinMap(@inout out: array<f32>, x: array<f32>): void {
   for (let i: u32 = 0; i < out.length; i++) {
     out[i] = asin(x[i]);
   }
 }
 
-export function asinhMap(out: array<f32>, x: array<f32>): void {
+export function asinhMap(@inout out: array<f32>, x: array<f32>): void {
   for (let i: u32 = 0; i < out.length; i++) {
     out[i] = asinh(x[i]);
   }
 }
 
-export function atanMap(out: array<f32>, x: array<f32>): void {
+export function atanMap(@inout out: array<f32>, x: array<f32>): void {
   for (let i: u32 = 0; i < out.length; i++) {
     out[i] = atan(x[i]);
   }
 }
 
-export function atanhMap(out: array<f32>, x: array<f32>): void {
+export function atanhMap(@inout out: array<f32>, x: array<f32>): void {
   for (let i: u32 = 0; i < out.length; i++) {
     out[i] = atanh(x[i]);
   }
 }
 
 /** 1 where `x` is at least 0, 0 below it. */
-export function stepMap(out: array<f32>, x: array<f32>): void {
+export function stepMap(@inout out: array<f32>, x: array<f32>): void {
   for (let i: u32 = 0; i < out.length; i++) {
     out[i] = step(0.0, x[i]);
   }
@@ -227,7 +227,7 @@ export function stepMap(out: array<f32>, x: array<f32>): void {
 // Maps with a scalar: the scalar follows the arrays.
 
 export function clipMap(
-  out: array<f32>,
+  @inout out: array<f32>,
   x: array<f32>,
   minimum: f32,
   maximum: f32,
@@ -237,14 +237,14 @@ export function clipMap(
   }
 }
 
-export function leakyReluMap(out: array<f32>, x: array<f32>, alpha: f32): void {
+export function leakyReluMap(@inout out: array<f32>, x: array<f32>, alpha: f32): void {
   for (let i: u32 = 0; i < out.length; i++) {
     const v = x[i];
     out[i] = select(alpha * v, v, v >= 0.0);
   }
 }
 
-export function eluMap(out: array<f32>, x: array<f32>, alpha: f32): void {
+export function eluMap(@inout out: array<f32>, x: array<f32>, alpha: f32): void {
   for (let i: u32 = 0; i < out.length; i++) {
     const v = x[i];
     let y: f32 = v;
@@ -255,14 +255,14 @@ export function eluMap(out: array<f32>, x: array<f32>, alpha: f32): void {
   }
 }
 
-export function relu6Map(out: array<f32>, x: array<f32>): void {
+export function relu6Map(@inout out: array<f32>, x: array<f32>): void {
   for (let i: u32 = 0; i < out.length; i++) {
     out[i] = min(max(x[i], 0.0), 6.0);
   }
 }
 
 /** `log(1 + exp(x))`, written so that `exp` never sees a large positive argument. */
-export function softplusMap(out: array<f32>, x: array<f32>): void {
+export function softplusMap(@inout out: array<f32>, x: array<f32>): void {
   for (let i: u32 = 0; i < out.length; i++) {
     const v = x[i];
     out[i] = max(v, 0.0) + log(1.0 + exp(-abs(v)));
@@ -270,7 +270,7 @@ export function softplusMap(out: array<f32>, x: array<f32>): void {
 }
 
 /** The tanh approximation of GELU. */
-export function geluMap(out: array<f32>, x: array<f32>): void {
+export function geluMap(@inout out: array<f32>, x: array<f32>): void {
   for (let i: u32 = 0; i < out.length; i++) {
     const v = x[i];
     const scaled = 0.7978845608 * (v + 0.044715 * v * v * v);

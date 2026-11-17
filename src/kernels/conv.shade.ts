@@ -9,7 +9,7 @@
 // compiler refuses a reserved name on an entry binding (TS8068), but not on a kernel parameter.
 
 export function conv2d(
-  out: array<f32>,
+  @inout out: array<f32>,
   x: array<f32>,
   weights: array<f32>,
   height: u32,
@@ -61,7 +61,7 @@ export function conv2d(
 
 /** The gradient of `conv2d` with respect to its input: one invocation for each input element. */
 export function conv2dInputGrad(
-  out: array<f32>,
+  @inout out: array<f32>,
   weights: array<f32>,
   dy: array<f32>,
   height: u32,
@@ -130,7 +130,7 @@ export function conv2dInputGrad(
 
 /** The gradient of `conv2d` with respect to its filter: one invocation for each filter element. */
 export function conv2dFilterGrad(
-  out: array<f32>,
+  @inout out: array<f32>,
   x: array<f32>,
   dy: array<f32>,
   batch: u32,

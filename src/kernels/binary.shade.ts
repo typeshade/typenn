@@ -46,14 +46,14 @@ function prelu1(value: f32, alpha: f32): f32 {
   return select(alpha * value, value, value >= 0.0);
 }
 
-export function add(out: array<f32>, a: array<f32>, b: array<f32>): void {
+export function add(@inout out: array<f32>, a: array<f32>, b: array<f32>): void {
   for (let i: u32 = 0; i < out.length; i++) {
     out[i] = a[i] + b[i];
   }
 }
 
 export function addExpand(
-  out: array<f32>,
+  @inout out: array<f32>,
   a: array<f32>,
   b: array<f32>,
   rank: u32,
@@ -66,7 +66,7 @@ export function addExpand(
 }
 
 export function addStrided(
-  out: array<f32>,
+  @inout out: array<f32>,
   a: array<f32>,
   b: array<f32>,
   rank: u32,
@@ -81,14 +81,14 @@ export function addStrided(
   }
 }
 
-export function sub(out: array<f32>, a: array<f32>, b: array<f32>): void {
+export function sub(@inout out: array<f32>, a: array<f32>, b: array<f32>): void {
   for (let i: u32 = 0; i < out.length; i++) {
     out[i] = a[i] - b[i];
   }
 }
 
 export function subExpand(
-  out: array<f32>,
+  @inout out: array<f32>,
   a: array<f32>,
   b: array<f32>,
   rank: u32,
@@ -101,7 +101,7 @@ export function subExpand(
 }
 
 export function subStrided(
-  out: array<f32>,
+  @inout out: array<f32>,
   a: array<f32>,
   b: array<f32>,
   rank: u32,
@@ -116,14 +116,14 @@ export function subStrided(
   }
 }
 
-export function mul(out: array<f32>, a: array<f32>, b: array<f32>): void {
+export function mul(@inout out: array<f32>, a: array<f32>, b: array<f32>): void {
   for (let i: u32 = 0; i < out.length; i++) {
     out[i] = a[i] * b[i];
   }
 }
 
 export function mulExpand(
-  out: array<f32>,
+  @inout out: array<f32>,
   a: array<f32>,
   b: array<f32>,
   rank: u32,
@@ -136,7 +136,7 @@ export function mulExpand(
 }
 
 export function mulStrided(
-  out: array<f32>,
+  @inout out: array<f32>,
   a: array<f32>,
   b: array<f32>,
   rank: u32,
@@ -151,14 +151,14 @@ export function mulStrided(
   }
 }
 
-export function div(out: array<f32>, a: array<f32>, b: array<f32>): void {
+export function div(@inout out: array<f32>, a: array<f32>, b: array<f32>): void {
   for (let i: u32 = 0; i < out.length; i++) {
     out[i] = a[i] / b[i];
   }
 }
 
 export function divExpand(
-  out: array<f32>,
+  @inout out: array<f32>,
   a: array<f32>,
   b: array<f32>,
   rank: u32,
@@ -171,7 +171,7 @@ export function divExpand(
 }
 
 export function divStrided(
-  out: array<f32>,
+  @inout out: array<f32>,
   a: array<f32>,
   b: array<f32>,
   rank: u32,
@@ -186,14 +186,14 @@ export function divStrided(
   }
 }
 
-export function maximum(out: array<f32>, a: array<f32>, b: array<f32>): void {
+export function maximum(@inout out: array<f32>, a: array<f32>, b: array<f32>): void {
   for (let i: u32 = 0; i < out.length; i++) {
     out[i] = max(a[i], b[i]);
   }
 }
 
 export function maximumExpand(
-  out: array<f32>,
+  @inout out: array<f32>,
   a: array<f32>,
   b: array<f32>,
   rank: u32,
@@ -206,7 +206,7 @@ export function maximumExpand(
 }
 
 export function maximumStrided(
-  out: array<f32>,
+  @inout out: array<f32>,
   a: array<f32>,
   b: array<f32>,
   rank: u32,
@@ -222,14 +222,14 @@ export function maximumStrided(
   }
 }
 
-export function minimum(out: array<f32>, a: array<f32>, b: array<f32>): void {
+export function minimum(@inout out: array<f32>, a: array<f32>, b: array<f32>): void {
   for (let i: u32 = 0; i < out.length; i++) {
     out[i] = min(a[i], b[i]);
   }
 }
 
 export function minimumExpand(
-  out: array<f32>,
+  @inout out: array<f32>,
   a: array<f32>,
   b: array<f32>,
   rank: u32,
@@ -242,7 +242,7 @@ export function minimumExpand(
 }
 
 export function minimumStrided(
-  out: array<f32>,
+  @inout out: array<f32>,
   a: array<f32>,
   b: array<f32>,
   rank: u32,
@@ -258,14 +258,14 @@ export function minimumStrided(
   }
 }
 
-export function power(out: array<f32>, a: array<f32>, b: array<f32>): void {
+export function power(@inout out: array<f32>, a: array<f32>, b: array<f32>): void {
   for (let i: u32 = 0; i < out.length; i++) {
     out[i] = a[i] ** b[i];
   }
 }
 
 export function powerExpand(
-  out: array<f32>,
+  @inout out: array<f32>,
   a: array<f32>,
   b: array<f32>,
   rank: u32,
@@ -278,7 +278,7 @@ export function powerExpand(
 }
 
 export function powerStrided(
-  out: array<f32>,
+  @inout out: array<f32>,
   a: array<f32>,
   b: array<f32>,
   rank: u32,
@@ -293,14 +293,14 @@ export function powerStrided(
   }
 }
 
-export function prelu(out: array<f32>, a: array<f32>, b: array<f32>): void {
+export function prelu(@inout out: array<f32>, a: array<f32>, b: array<f32>): void {
   for (let i: u32 = 0; i < out.length; i++) {
     out[i] = prelu1(a[i], b[i]);
   }
 }
 
 export function preluExpand(
-  out: array<f32>,
+  @inout out: array<f32>,
   a: array<f32>,
   b: array<f32>,
   rank: u32,
@@ -313,7 +313,7 @@ export function preluExpand(
 }
 
 export function preluStrided(
-  out: array<f32>,
+  @inout out: array<f32>,
   a: array<f32>,
   b: array<f32>,
   rank: u32,
@@ -335,7 +335,7 @@ export function preluStrided(
  * contributions of the `repeats` elements of the output that its operand element was broadcast to.
  */
 export function binaryGrad(
-  out: array<f32>,
+  @inout out: array<f32>,
   a: array<f32>,
   b: array<f32>,
   dy: array<f32>,

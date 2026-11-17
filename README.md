@@ -281,8 +281,9 @@ current Tensor-graph gradient rules.
 
 TypeShade owns the shader language and the GPU execution runtime. TypeNN's `.shade.ts` kernel
 functions are compiled during the library build. Applications use TypeNN's Tensor and Module API
-and do not author shaders. The build pins TypeShade to the source commit `be90a21`, which has
-`createDevice()` (change 0071), because TypeShade's npm registry package is still a placeholder.
+and do not author shaders. The build pins TypeShade to the source commit `f149b403`, which has
+`createDevice()` (change 0071) and `Buffer` (change 0138), because TypeShade's npm registry
+package is still a placeholder.
 
 For custom functions written as pure TypeShade IR, TypeNN also re-exports TypeShade's
 `grad` and `gradCheck` as `shadeGrad` and `shadeGradCheck`. They can generate and check
@@ -358,7 +359,7 @@ unsupported, and ask for the missing rule by name when called.
 ## Measurements
 
 Each measurement names the commit it was taken on. The sections below are historical. The build
-pins TypeShade `58e8187a` now, and no time was measured on that pin. "Pin 96dbaa9" holds the last
+pins TypeShade `f149b403` now, and no time was measured on that pin. "Pin 96dbaa9" holds the last
 times, on the pin before. A row that names an older commit or pin is a record of that commit, and
 the current code may differ.
 
@@ -627,7 +628,7 @@ hardware-tiled matmul and device-resident Adam updates are not implemented.
 ## Tests
 
 ```sh
-npm run lint      # Prettier over src, scripts, examples, tests and the documents
+npm run lint      # Prettier over src (not the .shade.ts shader sources), scripts, examples, tests and the documents
 npm test          # builds, then runs tests/*.test.mjs on Node
 TYPESHADE_CHROMIUM=/path/to/chrome npm run test:gpu   # builds, then runs tests/gpu/*.test.mjs
 ```

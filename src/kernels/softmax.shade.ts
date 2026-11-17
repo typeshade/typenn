@@ -6,7 +6,7 @@
 // `axisSize`: the kernel is made for the short axes of a classifier.
 
 export function softmax(
-  out: array<f32>,
+  @inout out: array<f32>,
   x: array<f32>,
   axisSize: u32,
   inner: u32,
@@ -26,7 +26,7 @@ export function softmax(
 }
 
 export function logSoftmax(
-  out: array<f32>,
+  @inout out: array<f32>,
   x: array<f32>,
   axisSize: u32,
   inner: u32,
@@ -47,7 +47,7 @@ export function logSoftmax(
 
 /** The gradient of `softmax` from `value`, its output, and `dy`, the gradient of that output. */
 export function softmaxGrad(
-  out: array<f32>,
+  @inout out: array<f32>,
   value: array<f32>,
   dy: array<f32>,
   axisSize: u32,
@@ -65,7 +65,7 @@ export function softmaxGrad(
 
 /** The gradient of `logSoftmax` from `value`, its output, and `dy`. */
 export function logSoftmaxGrad(
-  out: array<f32>,
+  @inout out: array<f32>,
   value: array<f32>,
   dy: array<f32>,
   axisSize: u32,
@@ -90,7 +90,7 @@ export function logSoftmaxGrad(
  * Each invocation reads its slice in O(axisSize); the sum entries read the peak again.
  */
 export function softmaxStatistics(
-  statistics: array<f32>,
+  @inout statistics: array<f32>,
   x: array<f32>,
   axisSize: u32,
   inner: u32,
@@ -116,7 +116,7 @@ export function softmaxStatistics(
 
 /** Apply the cached peak and sum of each slice: exp(x - peak) / total. */
 export function softmaxFromStatistics(
-  out: array<f32>,
+  @inout out: array<f32>,
   x: array<f32>,
   statistics: array<f32>,
   axisSize: u32,
@@ -130,7 +130,7 @@ export function softmaxFromStatistics(
 
 /** Apply the cached peak and sum of each slice: (x - peak) - log(total). */
 export function logSoftmaxFromStatistics(
-  out: array<f32>,
+  @inout out: array<f32>,
   x: array<f32>,
   statistics: array<f32>,
   axisSize: u32,
@@ -144,7 +144,7 @@ export function logSoftmaxFromStatistics(
 
 /** Reduce dy * y of each slice once (softmax). One invocation per slice. */
 export function softmaxGradReduction(
-  out: array<f32>,
+  @inout out: array<f32>,
   value: array<f32>,
   dy: array<f32>,
   axisSize: u32,
@@ -162,7 +162,7 @@ export function softmaxGradReduction(
 
 /** Reduce dy of each slice once (log softmax). One invocation per slice. */
 export function logSoftmaxGradReduction(
-  out: array<f32>,
+  @inout out: array<f32>,
   dy: array<f32>,
   axisSize: u32,
   inner: u32,
@@ -179,7 +179,7 @@ export function logSoftmaxGradReduction(
 
 /** Apply a cached slice reduction of dy * y to each element (softmax). */
 export function softmaxGradFromReduction(
-  out: array<f32>,
+  @inout out: array<f32>,
   value: array<f32>,
   dy: array<f32>,
   reduced: array<f32>,
@@ -194,7 +194,7 @@ export function softmaxGradFromReduction(
 
 /** Apply a cached slice reduction of dy to each element (log softmax). */
 export function logSoftmaxGradFromReduction(
-  out: array<f32>,
+  @inout out: array<f32>,
   value: array<f32>,
   dy: array<f32>,
   reduced: array<f32>,
