@@ -6,7 +6,7 @@
 // serial, so the order of a sum is the order of the axis, on every tier.
 
 export function sumAxis(
-  out: array<f32>,
+  @inout out: array<f32>,
   x: array<f32>,
   axisSize: u32,
   inner: u32,
@@ -22,7 +22,7 @@ export function sumAxis(
 }
 
 export function meanAxis(
-  out: array<f32>,
+  @inout out: array<f32>,
   x: array<f32>,
   axisSize: u32,
   inner: u32,
@@ -38,7 +38,7 @@ export function meanAxis(
 }
 
 export function prodAxis(
-  out: array<f32>,
+  @inout out: array<f32>,
   x: array<f32>,
   axisSize: u32,
   inner: u32,
@@ -54,7 +54,7 @@ export function prodAxis(
 }
 
 export function maxAxis(
-  out: array<f32>,
+  @inout out: array<f32>,
   x: array<f32>,
   axisSize: u32,
   inner: u32,
@@ -70,7 +70,7 @@ export function maxAxis(
 }
 
 export function minAxis(
-  out: array<f32>,
+  @inout out: array<f32>,
   x: array<f32>,
   axisSize: u32,
   inner: u32,
@@ -87,7 +87,7 @@ export function minAxis(
 
 /** The index along the axis of the first greatest element, as a number. */
 export function argMaxAxis(
-  out: array<f32>,
+  @inout out: array<f32>,
   x: array<f32>,
   axisSize: u32,
   inner: u32,
@@ -109,7 +109,7 @@ export function argMaxAxis(
 
 /** The index along the axis of the first least element, as a number. */
 export function argMinAxis(
-  out: array<f32>,
+  @inout out: array<f32>,
   x: array<f32>,
   axisSize: u32,
   inner: u32,
@@ -135,7 +135,7 @@ export function argMinAxis(
  * shape of the input, and `dy` the shape of the output.
  */
 export function reduceGrad(
-  out: array<f32>,
+  @inout out: array<f32>,
   dy: array<f32>,
   axisSize: u32,
   inner: u32,

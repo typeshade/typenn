@@ -6,7 +6,14 @@ async function filesIn(directory) {
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     const path = `${directory}/${entry.name}`;
     if (entry.isDirectory()) files.push(...(await filesIn(path)));
-    else if (entry.isFile() && !entry.name.endsWith(".shade.typeshade.ts"))
+    // A `.shade.ts` file is shader source, not TypeScript: Prettier cannot parse a parameter
+    // attribute (`@inout out: array<f32>`) on a top-level function. The compiler's own
+    // `.prettierignore` leaves `*.shade.ts` out for the same reason.
+    else if (
+      entry.isFile() &&
+      !entry.name.endsWith(".shade.typeshade.ts") &&
+      !entry.name.endsWith(".shade.ts")
+    )
       files.push(path);
   }
   return files;
